@@ -46,6 +46,11 @@ jobs:
           cache: 'npm'
           cache-dependency-path: src/Web/package-lock.json
 
+      - name: Show Node and npm versions
+        run: |
+          node -v
+          npm -v
+
       - name: Install dependencies
         working-directory: src/Web
         run: npm ci
