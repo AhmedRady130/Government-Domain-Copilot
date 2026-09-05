@@ -2,7 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
 namespace GovernmentDomainCopilot.Infrastructure.Persistence;
-
+/// <summary>
+/// Supplies EF Core tooling with the same environment-based connection-string convention as the API.
+/// </summary>
 public sealed class GovernmentDomainCopilotDbContextFactory
     : IDesignTimeDbContextFactory<GovernmentDomainCopilotDbContext>
 {
