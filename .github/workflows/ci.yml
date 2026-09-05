@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore .NET dependencies
+        run: dotnet restore GovernmentDomainCopilot.sln
+
+      - name: Build .NET solution
+        run: dotnet build GovernmentDomainCopilot.sln --configuration Release --no-restore
+
+      - name: Run .NET tests
+        run: dotnet test GovernmentDomainCopilot.sln --configuration Release --no-build
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/Web/package-lock.json
+
+      - name: Install Angular dependencies
+        working-directory: src/Web
+        run: npm ci
+
+      - name: Build Angular application
+        working-directory: src/Web
+        run: npm run build
