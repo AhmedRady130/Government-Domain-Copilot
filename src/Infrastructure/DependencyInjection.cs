@@ -1,6 +1,9 @@
 using GovernmentDomainCopilot.Application.Abstractions;
 using GovernmentDomainCopilot.Application.Documents;
+using GovernmentDomainCopilot.Application.Embeddings.Abstractions;
+using GovernmentDomainCopilot.Application.Embeddings.Models;
 using GovernmentDomainCopilot.Infrastructure.Documents;
+using GovernmentDomainCopilot.Infrastructure.Embeddings.Providers;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using GovernmentDomainCopilot.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
@@ -25,11 +28,20 @@ public static class DependencyInjection
         services.Configure<ChunkingOptions>(
             configuration.GetSection(ChunkingOptions.SectionName));
 
+        services.Configure<EmbeddingProviderOptions>(
+            configuration.GetSection(EmbeddingProviderOptions.SectionName));
+
         services.AddHttpContextAccessor();
         services.AddScoped<ITenantContext, DevelopmentTenantContext>();
 
         services.AddSingleton<IDocumentChunker, DeterministicDocumentChunker>();
         services.AddScoped<IDocumentRepository, DocumentRepository>();
+
+        services.AddHttpClient<GeminiEmbeddingProvider>();
+        services.AddHttpClient<OllamaEmbeddingProvider>();
+
+        services.AddSingleton<IEmbeddingProvider, GeminiEmbeddingProvider>();
+        services.AddSingleton<IEmbeddingProvider, OllamaEmbeddingProvider>();
 
         return services;
     }
