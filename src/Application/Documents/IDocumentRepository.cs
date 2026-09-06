@@ -27,9 +27,13 @@ public interface IDocumentRepository
     /// The implementation must verify that the <c>TenantId</c> of every
     /// <paramref name="chunks"/> element equals <c>document.TenantId</c> before
     /// writing, preventing accidental cross-tenant writes.
+    ///
+    /// Idempotency: If a document with the same <c>TenantId</c> and <c>SourceReference</c>
+    /// already exists, the repository atomically updates the document metadata and
+    /// replaces its chunks.
     /// </remarks>
     /// <param name="document">
-    /// The newly created <see cref="Document"/> entity. Must not be <see langword="null"/>.
+    /// The <see cref="Document"/> entity. Must not be <see langword="null"/>.
     /// </param>
     /// <param name="chunks">
     /// The ordered list of <see cref="DocumentChunk"/> entities belonging to
@@ -39,5 +43,41 @@ public interface IDocumentRepository
     Task SaveAsync(
         Document document,
         IReadOnlyList<DocumentChunk> chunks,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Retrieves a document by its unique identifier within the specified tenant.
+    /// </summary>
+    /// <param name="tenantId">The authenticated tenant identifier.</param>
+    /// <param name="id">The document identifier.</param>
+    /// <param name="cancellationToken">Token to observe for cancellation.</param>
+    /// <returns>The matching <see cref="Document"/> entity, or <see langword="null"/> if not found.</returns>
+    Task<Document?> GetByIdAsync(
+        Guid tenantId,
+        Guid id,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Retrieves a document by its stable source reference within the specified tenant.
+    /// </summary>
+    /// <param name="tenantId">The authenticated tenant identifier.</param>
+    /// <param name="sourceReference">The stable source reference string.</param>
+    /// <param name="cancellationToken">Token to observe for cancellation.</param>
+    /// <returns>The matching <see cref="Document"/> entity, or <see langword="null"/> if not found.</returns>
+    Task<Document?> GetBySourceReferenceAsync(
+        Guid tenantId,
+        string sourceReference,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Retrieves all chunks for a document ordered by sequence number within the specified tenant.
+    /// </summary>
+    /// <param name="tenantId">The authenticated tenant identifier.</param>
+    /// <param name="documentId">The parent document identifier.</param>
+    /// <param name="cancellationToken">Token to observe for cancellation.</param>
+    /// <returns>The ordered list of <see cref="DocumentChunk"/> entities.</returns>
+    Task<IReadOnlyList<DocumentChunk>> GetChunksByDocumentIdAsync(
+        Guid tenantId,
+        Guid documentId,
         CancellationToken cancellationToken);
 }

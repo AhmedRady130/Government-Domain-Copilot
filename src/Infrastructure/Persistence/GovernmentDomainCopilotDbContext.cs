@@ -51,7 +51,12 @@ public sealed class GovernmentDomainCopilotDbContext(
         ConfigureTenantOwnedEntity(entity, "Documents");
         entity.Property(item => item.Title).HasMaxLength(500).IsRequired();
         entity.Property(item => item.SourceReference).HasMaxLength(2_000).IsRequired();
+        entity.Property(item => item.IngestionStatus)
+            .HasConversion<string>()
+            .HasMaxLength(50)
+            .IsRequired();
         entity.Property(item => item.CreatedAtUtc).IsRequired();
+        entity.HasIndex(item => new { item.TenantId, item.SourceReference }).IsUnique();
     }
 
     private static void ConfigureDocumentChunk(EntityTypeBuilder<DocumentChunk> entity)
