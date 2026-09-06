@@ -51,8 +51,12 @@ public sealed class PgVectorChunkRetrieverIntegrationTests : IClassFixture<Pgvec
         await repo.SaveAsync(document, new[] { chunkClose, chunkMid, chunkFar }, CancellationToken.None);
 
         var closeVector = CreateVector(0.1f);
-        var midVector = CreateVector(0.5f);
-        var farVector = CreateVector(0.9f);
+        var midVector = new float[768];
+        for (int i = 0; i < 768; i++)
+        {
+            midVector[i] = i < 384 ? 0.1f : -0.1f;
+        }
+        var farVector = CreateVector(-0.1f);
 
         await repo.PersistEmbeddingsAsync(tenant.Id, new[]
         {
