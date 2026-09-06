@@ -1,11 +1,12 @@
-namespace GovernmentDomainCopilot.Infrastructure.Retrieval;
-
+using GovernmentDomainCopilot.Application.Retrieval;
 using GovernmentDomainCopilot.Application.Retrieval.Abstractions;
 using GovernmentDomainCopilot.Application.Retrieval.Models;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Pgvector;
 using Pgvector.EntityFrameworkCore;
+
+namespace GovernmentDomainCopilot.Infrastructure.Retrieval;
 
 public sealed class PgVectorChunkRetriever : IChunkRetriever
 {
@@ -26,6 +27,13 @@ public sealed class PgVectorChunkRetriever : IChunkRetriever
         if (queryVector.Length == 0)
         {
             throw new ArgumentException("Query vector cannot be empty.", nameof(queryVector));
+        }
+
+        if (queryVector.Length != VectorSearchLimits.ExpectedDimension)
+        {
+            throw new ArgumentException(
+                $"Query vector dimension {queryVector.Length} does not match expected dimension {VectorSearchLimits.ExpectedDimension}.",
+                nameof(queryVector));
         }
 
         if (topK <= 0)
