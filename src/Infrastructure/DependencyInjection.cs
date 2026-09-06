@@ -1,3 +1,5 @@
+using GovernmentDomainCopilot.Application.Documents;
+using GovernmentDomainCopilot.Infrastructure.Documents;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -17,6 +19,12 @@ public static class DependencyInjection
 
         services.AddDbContext<GovernmentDomainCopilotDbContext>(options =>
             options.UseNpgsql(connectionString));
+
+        services.Configure<ChunkingOptions>(
+            configuration.GetSection(ChunkingOptions.SectionName));
+
+        services.AddSingleton<IDocumentChunker, DeterministicDocumentChunker>();
+        services.AddScoped<IDocumentRepository, DocumentRepository>();
 
         return services;
     }
