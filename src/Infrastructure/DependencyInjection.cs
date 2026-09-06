@@ -1,5 +1,6 @@
 using GovernmentDomainCopilot.Application.Abstractions;
 using GovernmentDomainCopilot.Application.Documents;
+using GovernmentDomainCopilot.Application.Documents.Abstractions;
 using GovernmentDomainCopilot.Application.Embeddings.Abstractions;
 using GovernmentDomainCopilot.Application.Embeddings.Models;
 using GovernmentDomainCopilot.Infrastructure.Documents;
@@ -23,7 +24,7 @@ public static class DependencyInjection
                 "The 'GovernmentDomainCopilot' connection string must be configured.");
 
         services.AddDbContext<GovernmentDomainCopilotDbContext>(options =>
-            options.UseNpgsql(connectionString));
+            options.UseNpgsql(connectionString, npgsqlOptions => npgsqlOptions.UseVector()));
 
         services.Configure<ChunkingOptions>(
             configuration.GetSection(ChunkingOptions.SectionName));
@@ -35,7 +36,9 @@ public static class DependencyInjection
         services.AddScoped<ITenantContext, DevelopmentTenantContext>();
 
         services.AddSingleton<IDocumentChunker, DeterministicDocumentChunker>();
-        services.AddScoped<IDocumentRepository, DocumentRepository>();
+        services.AddScoped<DocumentRepository>();
+        services.AddScoped<IDocumentRepository>(sp => sp.GetRequiredService<DocumentRepository>());
+        services.AddScoped<IChunkEmbeddingRepository>(sp => sp.GetRequiredService<DocumentRepository>());
 
         services.AddHttpClient<GeminiEmbeddingProvider>();
         services.AddHttpClient<OllamaEmbeddingProvider>();

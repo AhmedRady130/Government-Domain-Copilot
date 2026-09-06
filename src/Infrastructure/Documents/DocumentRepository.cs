@@ -1,4 +1,5 @@
 using GovernmentDomainCopilot.Application.Documents;
+using GovernmentDomainCopilot.Application.Documents.Abstractions;
 using GovernmentDomainCopilot.Domain.Entities;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -6,9 +7,9 @@ using Microsoft.EntityFrameworkCore;
 namespace GovernmentDomainCopilot.Infrastructure.Documents;
 
 /// <summary>
-/// Infrastructure EF Core implementation of <see cref="IDocumentRepository"/>.
+/// Infrastructure EF Core implementation of <see cref="IDocumentRepository"/> and <see cref="IChunkEmbeddingRepository"/>.
 /// </summary>
-public sealed class DocumentRepository : IDocumentRepository
+public sealed class DocumentRepository : IDocumentRepository, IChunkEmbeddingRepository
 {
     private readonly GovernmentDomainCopilotDbContext _context;
 
@@ -152,5 +153,52 @@ public sealed class DocumentRepository : IDocumentRepository
             .Where(c => c.TenantId == tenantId && c.DocumentId == documentId)
             .OrderBy(c => c.Sequence)
             .ToListAsync(cancellationToken);
+    }
+
+    public async Task PersistEmbeddingsAsync(
+        Guid tenantId,
+        IReadOnlyList<(Guid ChunkId, float[] Vector)> embeddings,
+        int expectedDimension,
+        CancellationToken cancellationToken)
+    {
+        if (tenantId == Guid.Empty)
+        {
+            throw new ArgumentOutOfRangeException(nameof(tenantId), tenantId, "TenantId cannot be empty.");
+        }
+
+        ArgumentNullException.ThrowIfNull(embeddings);
+
+        if (embeddings.Count == 0)
+        {
+            return;
+        }
+
+        var chunkIds = embeddings.Select(e => e.ChunkId).Distinct().ToList();
+
+        var chunks = await _context.DocumentChunks
+            .Where(c => chunkIds.Contains(c.Id))
+            .ToListAsync(cancellationToken);
+
+        if (chunks.Count != chunkIds.Count)
+        {
+            throw new InvalidOperationException("One or more chunk IDs were not found in the database.");
+        }
+
+        if (chunks.Any(c => c.TenantId != tenantId))
+        {
+            throw new InvalidOperationException("Cross-tenant embedding write detected. All chunks must belong to tenantId.");
+        }
+
+        var embeddingMap = embeddings.ToDictionary(e => e.ChunkId, e => e.Vector);
+
+        foreach (var chunk in chunks)
+        {
+            if (embeddingMap.TryGetValue(chunk.Id, out var vector))
+            {
+                chunk.SetEmbedding(vector, expectedDimension);
+            }
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
     }
 }

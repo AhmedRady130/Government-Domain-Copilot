@@ -19,10 +19,17 @@ public sealed class GovernmentDomainCopilotDbContext(
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        var isNpgsql = Database.IsNpgsql();
+
+        if (isNpgsql)
+        {
+            modelBuilder.HasPostgresExtension("vector");
+        }
+
         ConfigureTenant(modelBuilder.Entity<Tenant>());
         ConfigureUser(modelBuilder.Entity<User>());
         ConfigureDocument(modelBuilder.Entity<Document>());
-        ConfigureDocumentChunk(modelBuilder.Entity<DocumentChunk>());
+        ConfigureDocumentChunk(modelBuilder.Entity<DocumentChunk>(), isNpgsql);
         ConfigureConversationSession(modelBuilder.Entity<ConversationSession>());
         ConfigureRun(modelBuilder.Entity<Run>());
         ConfigureApproval(modelBuilder.Entity<Approval>());
@@ -62,11 +69,30 @@ public sealed class GovernmentDomainCopilotDbContext(
         entity.HasIndex(item => new { item.TenantId, item.SourceReference }).IsUnique();
     }
 
-    private static void ConfigureDocumentChunk(EntityTypeBuilder<DocumentChunk> entity)
+    private static void ConfigureDocumentChunk(EntityTypeBuilder<DocumentChunk> entity, bool isNpgsql)
     {
         ConfigureTenantOwnedEntity(entity, "DocumentChunks");
         entity.Property(item => item.Content).IsRequired();
         entity.Property(item => item.Sequence).IsRequired();
+
+        if (isNpgsql)
+        {
+            entity.Property(item => item.Embedding)
+                .HasColumnType("vector(768)")
+                .HasConversion(
+                    v => v == null ? null : new Pgvector.Vector(v),
+                    v => v == null ? null : v.ToArray())
+                .IsRequired(false);
+        }
+        else
+        {
+            entity.Property(item => item.Embedding)
+                .HasConversion(
+                    v => v == null ? null : string.Join(',', v),
+                    v => string.IsNullOrEmpty(v) ? null : v.Split(',', StringSplitOptions.None).Select(float.Parse).ToArray())
+                .IsRequired(false);
+        }
+
         entity.HasIndex(item => new { item.TenantId, item.DocumentId, item.Sequence }).IsUnique();
         entity.HasOne<Document>()
             .WithMany()

@@ -11,6 +11,7 @@ public static class DependencyInjection
     {
         services.AddScoped<IIngestDocumentUseCase, IngestDocumentUseCase>();
         services.AddScoped<IEmbeddingService, ResilientEmbeddingService>();
+        services.AddScoped<IChunkEmbeddingService, ChunkEmbeddingService>();
         return services;
     }
 }
