@@ -69,7 +69,7 @@ public sealed class PostgreSqlTestDatabaseFixture : IAsyncLifetime
 
         if (_connectionString != null && ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
         {
-            optionsBuilder.UseNpgsql(_connectionString);
+            optionsBuilder.UseNpgsql(_connectionString, npgsqlOptions => npgsqlOptions.UseVector());
         }
         else if (_sqliteConnection != null)
         {
