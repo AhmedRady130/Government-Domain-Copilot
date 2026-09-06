@@ -6,4 +6,4 @@ public sealed record HybridSearchResponse(
     TimeSpan Duration,
     string ProviderName,
     string ModelName,
-    IReadOnlyList<HybridSearchResultItem> Items);
+    IReadOnlyList<RerankResultItem> Items);

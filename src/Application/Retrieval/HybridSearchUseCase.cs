@@ -14,6 +14,7 @@ public sealed class HybridSearchUseCase : IHybridSearchUseCase
     private readonly IVectorSearchUseCase _vectorSearchUseCase;
     private readonly IKeywordChunkRetriever _keywordRetriever;
     private readonly ReciprocalRankFusionService _rrfService;
+    private readonly IRetrievalReranker _reranker;
     private readonly ILogger<HybridSearchUseCase> _logger;
 
     public HybridSearchUseCase(
@@ -21,12 +22,14 @@ public sealed class HybridSearchUseCase : IHybridSearchUseCase
         IVectorSearchUseCase vectorSearchUseCase,
         IKeywordChunkRetriever keywordRetriever,
         ReciprocalRankFusionService rrfService,
+        IRetrievalReranker reranker,
         ILogger<HybridSearchUseCase> logger)
     {
         _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
         _vectorSearchUseCase = vectorSearchUseCase ?? throw new ArgumentNullException(nameof(vectorSearchUseCase));
         _keywordRetriever = keywordRetriever ?? throw new ArgumentNullException(nameof(keywordRetriever));
         _rrfService = rrfService ?? throw new ArgumentNullException(nameof(rrfService));
+        _reranker = reranker ?? throw new ArgumentNullException(nameof(reranker));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -99,18 +102,27 @@ public sealed class HybridSearchUseCase : IHybridSearchUseCase
             throw new VectorSearchException("Both vector and keyword search branches failed during hybrid retrieval.");
         }
 
+        // Step 1: RRF fusion
         var fused = _rrfService.Fuse(vectorCandidates, keywordCandidates, ReciprocalRankFusionService.DefaultK);
-        var finalItems = fused.Take(topK).ToList();
+
+        // Step 2: Deterministic reranking over the bounded, tenant-scoped candidate set
+        var rerankRequest = new RerankRequest(fused);
+        var reranked = _reranker.Rerank(rerankRequest);
+
+        // Step 3: Final TopK slice
+        var finalItems = reranked.Take(topK).ToList();
 
         stopwatch.Stop();
 
         _logger.LogInformation(
-            "Hybrid search completed for tenant {TenantId}: TopK={TopK}, VectorCandidates={VectorCandidates}, KeywordCandidates={KeywordCandidates}, TotalReturned={TotalReturned}, DurationMs={DurationMs}",
+            "Hybrid search completed for tenant {TenantId}: TopK={TopK}, VectorCandidates={VectorCandidates}, KeywordCandidates={KeywordCandidates}, FusedCandidates={FusedCandidates}, TotalReturned={TotalReturned}, Reranker={RerankerName}, DurationMs={DurationMs}",
             tenantId,
             topK,
             vectorCandidates.Count,
             keywordCandidates.Count,
+            fused.Count,
             finalItems.Count,
+            WeightedSignalReranker.RerankerName,
             stopwatch.ElapsedMilliseconds);
 
         return new HybridSearchResponse(

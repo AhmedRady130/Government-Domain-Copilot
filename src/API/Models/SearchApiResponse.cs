@@ -10,7 +10,9 @@ public sealed record SearchResultItemApiResponse(
     double? Distance,
     double? KeywordScore,
     double RrfScore,
-    int Rank);
+    int Rank,
+    double RerankScore,
+    int FinalRank);
 
 public sealed record SearchApiResponse(
     int TopK,

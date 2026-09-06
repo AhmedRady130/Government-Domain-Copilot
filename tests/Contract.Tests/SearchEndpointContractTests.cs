@@ -93,7 +93,25 @@ public sealed class SearchEndpointContractTests : IClassFixture<WebApplicationFa
     }
 
     [Fact]
-    public async Task Search_does_not_leak_internal_exception_details()
+    public async Task Search_ResponseContainsRerankScoreAndFinalRank()
+    {
+        var client = _factory.CreateClient();
+        var response = await client.GetAsync("/api/search?query=procurement%20decree&topK=3");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var result = await response.Content.ReadFromJsonAsync<SearchApiResponse>();
+        Assert.NotNull(result);
+        Assert.NotEmpty(result.Items);
+
+        var item = result.Items[0];
+        Assert.True(item.RerankScore >= 0.0 && item.RerankScore <= 1.0);
+        Assert.Equal(1, item.FinalRank);
+        Assert.Equal(1, item.Rank);
+    }
+
+    [Fact]
+    public async Task Search_does_not_leak_internal_exception_details_or_sensitive_fields()
     {
         var client = _factory.CreateClient();
 
@@ -102,8 +120,13 @@ public sealed class SearchEndpointContractTests : IClassFixture<WebApplicationFa
         var json = await response.Content.ReadAsStringAsync();
         Assert.DoesNotContain("StackTrace", json);
         Assert.DoesNotContain("Npgsql", json);
+        Assert.DoesNotContain("Pgvector", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("TenantId", json);
         Assert.DoesNotContain("at GovernmentDomainCopilot", json);
     }
+
+    private static readonly Guid TestChunkId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid TestDocId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
     private sealed class StubChunkRetriever : IChunkRetriever
     {
@@ -114,8 +137,8 @@ public sealed class SearchEndpointContractTests : IClassFixture<WebApplicationFa
             CancellationToken cancellationToken)
         {
             var dummyItem = new VectorSearchResultItem(
-                Guid.NewGuid(),
-                Guid.NewGuid(),
+                TestChunkId,
+                TestDocId,
                 0,
                 "Sample Title",
                 "sample-ref",
@@ -136,8 +159,8 @@ public sealed class SearchEndpointContractTests : IClassFixture<WebApplicationFa
             CancellationToken cancellationToken)
         {
             var dummyItem = new KeywordSearchResultItem(
-                Guid.NewGuid(),
-                Guid.NewGuid(),
+                TestChunkId,
+                TestDocId,
                 0,
                 "Sample Title",
                 "sample-ref",

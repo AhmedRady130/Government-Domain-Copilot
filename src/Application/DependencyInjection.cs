@@ -17,6 +17,7 @@ public static class DependencyInjection
         services.AddScoped<IChunkEmbeddingService, ChunkEmbeddingService>();
         services.AddScoped<IVectorSearchUseCase, VectorSearchUseCase>();
         services.AddSingleton<ReciprocalRankFusionService>();
+        services.AddSingleton<IRetrievalReranker, WeightedSignalReranker>();
         services.AddScoped<IHybridSearchUseCase, HybridSearchUseCase>();
         return services;
     }
