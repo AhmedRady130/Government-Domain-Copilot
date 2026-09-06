@@ -119,16 +119,76 @@ public sealed class HybridSearchUseCaseTests
         Assert.NotNull(response.Items[0].KeywordScore);
     }
 
+    [Fact]
+    public async Task SearchAsync_EnforcesFinalTopKSlice()
+    {
+        var docId = Guid.NewGuid();
+        var items = Enumerable.Range(1, 10).Select(i =>
+            new VectorSearchResultItem(Guid.NewGuid(), docId, i, $"Title {i}", $"ref-{i}", $"Content {i}", 0.1 * i, i)).ToList();
+
+        var vectorResponse = new VectorSearchResponse(
+            10, 10, TimeSpan.FromMilliseconds(10), "Gemini", "gemini-embedding-2", items);
+
+        var fakeVectorUseCase = new FakeVectorSearchUseCase(vectorResponse);
+        var fakeKeywordRetriever = new FakeKeywordRetriever();
+
+        var sut = CreateSut(new FakeTenantContext(_tenantId), fakeVectorUseCase, fakeKeywordRetriever);
+
+        var response = await sut.SearchAsync(new VectorSearchRequest("query", topK: 3), CancellationToken.None);
+
+        Assert.Equal(3, response.TopK);
+        Assert.Equal(3, response.Items.Count);
+    }
+
+    [Fact]
+    public async Task SearchAsync_PropagatesTenantContextToRetrievalBranches()
+    {
+        var tenantContext = new FakeTenantContext(_tenantId);
+        var fakeVectorUseCase = new FakeVectorSearchUseCase();
+        var fakeKeywordRetriever = new FakeKeywordRetriever();
+
+        var sut = CreateSut(tenantContext, fakeVectorUseCase, fakeKeywordRetriever);
+
+        await sut.SearchAsync(new VectorSearchRequest("query"), CancellationToken.None);
+
+        Assert.Equal(_tenantId, fakeKeywordRetriever.LastTenantId);
+    }
+
+    [Fact]
+    public async Task SearchAsync_InvokesRerankerExactlyOnce()
+    {
+        var spyReranker = new SpyReranker();
+        var fakeVectorUseCase = new FakeVectorSearchUseCase();
+        var fakeKeywordRetriever = new FakeKeywordRetriever(new[]
+        {
+            new KeywordSearchResultItem(Guid.NewGuid(), Guid.NewGuid(), 0, "Title", "ref", "Content", 0.5, 1)
+        });
+
+        var sut = new HybridSearchUseCase(
+            new FakeTenantContext(_tenantId),
+            fakeVectorUseCase,
+            fakeKeywordRetriever,
+            new ReciprocalRankFusionService(),
+            spyReranker,
+            NullLogger<HybridSearchUseCase>.Instance);
+
+        await sut.SearchAsync(new VectorSearchRequest("query"), CancellationToken.None);
+
+        Assert.Equal(1, spyReranker.CallCount);
+    }
+
     private static HybridSearchUseCase CreateSut(
         ITenantContext tenantContext,
         IVectorSearchUseCase vectorSearchUseCase,
-        IKeywordChunkRetriever keywordRetriever)
+        IKeywordChunkRetriever keywordRetriever,
+        IRetrievalReranker? reranker = null)
     {
         return new HybridSearchUseCase(
             tenantContext,
             vectorSearchUseCase,
             keywordRetriever,
             new ReciprocalRankFusionService(),
+            reranker ?? new WeightedSignalReranker(),
             NullLogger<HybridSearchUseCase>.Instance);
     }
 
@@ -166,6 +226,7 @@ public sealed class HybridSearchUseCaseTests
     {
         private readonly IReadOnlyList<KeywordSearchResultItem>? _results;
         private readonly bool _shouldThrow;
+        public Guid LastTenantId { get; private set; }
 
         public FakeKeywordRetriever(IReadOnlyList<KeywordSearchResultItem>? results = null, bool shouldThrow = false)
         {
@@ -175,12 +236,24 @@ public sealed class HybridSearchUseCaseTests
 
         public Task<IReadOnlyList<KeywordSearchResultItem>> SearchKeywordAsync(Guid tenantId, string query, int topK, CancellationToken cancellationToken)
         {
+            LastTenantId = tenantId;
             if (_shouldThrow)
             {
                 throw new InvalidOperationException("Keyword branch failed.");
             }
 
             return Task.FromResult(_results ?? Array.Empty<KeywordSearchResultItem>());
+        }
+    }
+
+    private sealed class SpyReranker : IRetrievalReranker
+    {
+        public int CallCount { get; private set; }
+
+        public IReadOnlyList<RerankResultItem> Rerank(RerankRequest request)
+        {
+            CallCount++;
+            return new WeightedSignalReranker().Rerank(request);
         }
     }
 }

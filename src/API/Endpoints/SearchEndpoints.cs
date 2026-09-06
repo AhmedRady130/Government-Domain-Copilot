@@ -47,7 +47,9 @@ public static class SearchEndpoints
                     item.Distance,
                     item.KeywordScore,
                     item.RrfScore,
-                    item.Rank)).ToList();
+                    item.Rank,
+                    item.RerankScore,
+                    item.FinalRank)).ToList();
 
                 var response = new SearchApiResponse(
                     result.TopK,
