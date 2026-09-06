@@ -1,6 +1,8 @@
+using GovernmentDomainCopilot.Application.Abstractions;
 using GovernmentDomainCopilot.Application.Documents;
 using GovernmentDomainCopilot.Infrastructure.Documents;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
+using GovernmentDomainCopilot.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,6 +24,9 @@ public static class DependencyInjection
 
         services.Configure<ChunkingOptions>(
             configuration.GetSection(ChunkingOptions.SectionName));
+
+        services.AddHttpContextAccessor();
+        services.AddScoped<ITenantContext, DevelopmentTenantContext>();
 
         services.AddSingleton<IDocumentChunker, DeterministicDocumentChunker>();
         services.AddScoped<IDocumentRepository, DocumentRepository>();
