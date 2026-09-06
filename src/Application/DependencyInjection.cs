@@ -1,6 +1,8 @@
 using GovernmentDomainCopilot.Application.Documents;
 using GovernmentDomainCopilot.Application.Embeddings;
 using GovernmentDomainCopilot.Application.Embeddings.Abstractions;
+using GovernmentDomainCopilot.Application.Retrieval;
+using GovernmentDomainCopilot.Application.Retrieval.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GovernmentDomainCopilot.Application;
@@ -12,6 +14,7 @@ public static class DependencyInjection
         services.AddScoped<IIngestDocumentUseCase, IngestDocumentUseCase>();
         services.AddScoped<IEmbeddingService, ResilientEmbeddingService>();
         services.AddScoped<IChunkEmbeddingService, ChunkEmbeddingService>();
+        services.AddScoped<IVectorSearchUseCase, VectorSearchUseCase>();
         return services;
     }
 }
