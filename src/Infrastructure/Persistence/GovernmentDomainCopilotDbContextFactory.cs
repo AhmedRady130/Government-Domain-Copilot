@@ -16,7 +16,7 @@ public sealed class GovernmentDomainCopilotDbContextFactory
                 "Set ConnectionStrings__GovernmentDomainCopilot before running EF Core tooling.");
 
         var options = new DbContextOptionsBuilder<GovernmentDomainCopilotDbContext>()
-            .UseNpgsql(connectionString)
+            .UseNpgsql(connectionString, o => o.UseVector())
             .Options;
 
         return new GovernmentDomainCopilotDbContext(options);

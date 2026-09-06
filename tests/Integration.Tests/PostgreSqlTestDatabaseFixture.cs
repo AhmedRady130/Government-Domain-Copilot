@@ -30,7 +30,7 @@ public sealed class PostgreSqlTestDatabaseFixture : IAsyncLifetime
         try
         {
             _postgreSqlContainer = new PostgreSqlBuilder()
-                .WithImage("postgres:16-alpine")
+                .WithImage("pgvector/pgvector:pg16")
                 .WithDatabase("test_government_domain_copilot")
                 .WithUsername("test_user")
                 .WithPassword("test_password_123!")
@@ -69,7 +69,7 @@ public sealed class PostgreSqlTestDatabaseFixture : IAsyncLifetime
 
         if (_connectionString != null && ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
         {
-            optionsBuilder.UseNpgsql(_connectionString);
+            optionsBuilder.UseNpgsql(_connectionString, npgsqlOptions => npgsqlOptions.UseVector());
         }
         else if (_sqliteConnection != null)
         {
@@ -91,6 +91,7 @@ public sealed class PostgreSqlTestDatabaseFixture : IAsyncLifetime
         {
             // Run real EF Core migrations on PostgreSQL test database
             await context.Database.MigrateAsync();
+            Npgsql.NpgsqlConnection.ClearAllPools();
         }
         else
         {
