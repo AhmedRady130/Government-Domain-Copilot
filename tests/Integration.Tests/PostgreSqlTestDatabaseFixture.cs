@@ -91,6 +91,7 @@ public sealed class PostgreSqlTestDatabaseFixture : IAsyncLifetime
         {
             // Run real EF Core migrations on PostgreSQL test database
             await context.Database.MigrateAsync();
+            Npgsql.NpgsqlConnection.ClearAllPools();
         }
         else
         {

@@ -65,6 +65,7 @@ public sealed class PgvectorTestDatabaseFixture : IAsyncLifetime
         using var context = CreateDbContext();
         // Run EF Core migrations to enable vector extension, column, and HNSW index
         await context.Database.MigrateAsync();
+        Npgsql.NpgsqlConnection.ClearAllPools();
     }
 
     public async Task DisposeAsync()
