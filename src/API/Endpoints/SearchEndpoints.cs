@@ -16,7 +16,7 @@ public static class SearchEndpoints
         endpoints.MapGet("/api/search", async (
             string? query,
             int? topK,
-            IVectorSearchUseCase useCase,
+            IHybridSearchUseCase useCase,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
@@ -45,6 +45,8 @@ public static class SearchEndpoints
                     item.SourceReference,
                     item.Content,
                     item.Distance,
+                    item.KeywordScore,
+                    item.RrfScore,
                     item.Rank)).ToList();
 
                 var response = new SearchApiResponse(
@@ -78,7 +80,7 @@ public static class SearchEndpoints
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Unexpected error occurred during vector search.");
+                logger.LogError(ex, "Unexpected error occurred during hybrid search.");
 
                 return Results.Problem(
                     statusCode: StatusCodes.Status500InternalServerError,
@@ -86,7 +88,7 @@ public static class SearchEndpoints
                     detail: "An unexpected error occurred processing your search request.");
             }
         })
-        .WithName("VectorSearch")
+        .WithName("HybridSearch")
         .Produces<SearchApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status403Forbidden)
