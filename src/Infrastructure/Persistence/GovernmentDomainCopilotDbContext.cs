@@ -83,6 +83,13 @@ public sealed class GovernmentDomainCopilotDbContext(
                     v => v == null ? null : new Pgvector.Vector(v),
                     v => v == null ? null : v.ToArray())
                 .IsRequired(false);
+
+            entity.Property<NpgsqlTypes.NpgsqlTsVector>("SearchVector")
+                .HasColumnType("tsvector")
+                .HasComputedColumnSql("to_tsvector('simple', coalesce(\"Content\", ''))", stored: true);
+
+            entity.HasIndex("SearchVector")
+                .HasMethod("gin");
         }
         else
         {

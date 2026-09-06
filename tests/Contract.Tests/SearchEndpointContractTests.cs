@@ -47,6 +47,12 @@ public sealed class SearchEndpointContractTests : IClassFixture<WebApplicationFa
                     services.Remove(retrieverDescriptor);
                 }
 
+                var keywordRetrieverDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IKeywordChunkRetriever));
+                if (keywordRetrieverDescriptor != null)
+                {
+                    services.Remove(keywordRetrieverDescriptor);
+                }
+
                 var embeddingServiceDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IEmbeddingService));
                 if (embeddingServiceDescriptor != null)
                 {
@@ -54,6 +60,7 @@ public sealed class SearchEndpointContractTests : IClassFixture<WebApplicationFa
                 }
 
                 services.AddScoped<IChunkRetriever, StubChunkRetriever>();
+                services.AddScoped<IKeywordChunkRetriever, StubKeywordChunkRetriever>();
                 services.AddScoped<IEmbeddingService, StubEmbeddingService>();
             });
         });
@@ -117,6 +124,28 @@ public sealed class SearchEndpointContractTests : IClassFixture<WebApplicationFa
                 rank: 1);
 
             return Task.FromResult<IReadOnlyList<VectorSearchResultItem>>(new[] { dummyItem });
+        }
+    }
+
+    private sealed class StubKeywordChunkRetriever : IKeywordChunkRetriever
+    {
+        public Task<IReadOnlyList<KeywordSearchResultItem>> SearchKeywordAsync(
+            Guid tenantId,
+            string query,
+            int topK,
+            CancellationToken cancellationToken)
+        {
+            var dummyItem = new KeywordSearchResultItem(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                0,
+                "Sample Title",
+                "sample-ref",
+                "Sample chunk content.",
+                KeywordScore: 0.85,
+                Rank: 1);
+
+            return Task.FromResult<IReadOnlyList<KeywordSearchResultItem>>(new[] { dummyItem });
         }
     }
 

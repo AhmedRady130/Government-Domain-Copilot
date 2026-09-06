@@ -42,6 +42,7 @@ public static class DependencyInjection
         services.AddScoped<IDocumentRepository>(sp => sp.GetRequiredService<DocumentRepository>());
         services.AddScoped<IChunkEmbeddingRepository>(sp => sp.GetRequiredService<DocumentRepository>());
         services.AddScoped<IChunkRetriever, PgVectorChunkRetriever>();
+        services.AddScoped<IKeywordChunkRetriever, PgKeywordChunkRetriever>();
 
         services.AddHttpClient<GeminiEmbeddingProvider>();
         services.AddHttpClient<OllamaEmbeddingProvider>();

@@ -7,7 +7,9 @@ public sealed record SearchResultItemApiResponse(
     string Title,
     string SourceReference,
     string Content,
-    double Distance,
+    double? Distance,
+    double? KeywordScore,
+    double RrfScore,
     int Rank);
 
 public sealed record SearchApiResponse(
