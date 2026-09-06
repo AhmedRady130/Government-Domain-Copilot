@@ -30,7 +30,7 @@ public sealed class PostgreSqlTestDatabaseFixture : IAsyncLifetime
         try
         {
             _postgreSqlContainer = new PostgreSqlBuilder()
-                .WithImage("postgres:16-alpine")
+                .WithImage("pgvector/pgvector:pg16")
                 .WithDatabase("test_government_domain_copilot")
                 .WithUsername("test_user")
                 .WithPassword("test_password_123!")
