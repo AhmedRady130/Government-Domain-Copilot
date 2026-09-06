@@ -89,6 +89,107 @@ public sealed class IngestDocumentUseCaseTests
         Assert.Equal("DB error", exception.Message);
     }
 
+    [Fact]
+    public async Task Chunker_failure_results_in_safe_failure_behavior()
+    {
+        var tenantContext = new FakeTenantContext(_tenantId);
+        var chunker = new FakeFailingDocumentChunker("Invalid encoding in text.");
+        var repository = new FakeDocumentRepository();
+
+        var useCase = new IngestDocumentUseCase(tenantContext, chunker, repository);
+        var command = new IngestDocumentCommand("Decree Title", "ref-chunker-fail", "Corrupted text");
+
+        var result = await useCase.IngestAsync(command, CancellationToken.None);
+
+        Assert.Equal(DocumentIngestionStatus.Failed, result.Status);
+        Assert.Equal(0, result.ChunkCount);
+        Assert.NotNull(result.FailureReason);
+        Assert.Contains("Chunking processing failed", result.FailureReason);
+
+        Assert.NotNull(repository.SavedDocument);
+        Assert.Equal(DocumentIngestionStatus.Failed, repository.SavedDocument.IngestionStatus);
+        Assert.Empty(repository.SavedChunks!);
+    }
+
+    [Fact]
+    public async Task Repository_failure_results_in_safe_failure_behavior()
+    {
+        var tenantContext = new FakeTenantContext(_tenantId);
+        var chunker = new FakeDocumentChunker(new List<ChunkData> { new(0, "Valid content") });
+        var repository = new FakeDocumentRepository { ThrowOnSave = new InvalidOperationException("Database constraint violation") };
+
+        var useCase = new IngestDocumentUseCase(tenantContext, chunker, repository);
+        var command = new IngestDocumentCommand("Decree Title", "ref-repo-fail", "Valid source text");
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => useCase.IngestAsync(command, CancellationToken.None));
+        Assert.Equal("Database constraint violation", exception.Message);
+    }
+
+    [Fact]
+    public async Task Document_does_not_incorrectly_remain_Pending_after_controlled_failure()
+    {
+        var tenantContext = new FakeTenantContext(_tenantId);
+        var chunker = new FakeDocumentChunker(Array.Empty<ChunkData>());
+        var repository = new FakeDocumentRepository();
+
+        var useCase = new IngestDocumentUseCase(tenantContext, chunker, repository);
+        var command = new IngestDocumentCommand("Title", "ref-no-chunks", "No chunks text");
+
+        var result = await useCase.IngestAsync(command, CancellationToken.None);
+
+        Assert.Equal(DocumentIngestionStatus.Failed, result.Status);
+        Assert.NotNull(repository.SavedDocument);
+        Assert.NotEqual(DocumentIngestionStatus.Pending, repository.SavedDocument.IngestionStatus);
+        Assert.Equal(DocumentIngestionStatus.Failed, repository.SavedDocument.IngestionStatus);
+    }
+
+    [Fact]
+    public async Task Successful_retry_completes_the_document()
+    {
+        var tenantContext = new FakeTenantContext(_tenantId);
+        var repository = new FakeDocumentRepository();
+
+        // 1. Initial attempt fails due to chunker failure
+        var failingChunker = new FakeDocumentChunker(Array.Empty<ChunkData>());
+        var failingUseCase = new IngestDocumentUseCase(tenantContext, failingChunker, repository);
+        var command = new IngestDocumentCommand("Retry Decree", "ref-retry-101", "Text");
+
+        var firstResult = await failingUseCase.IngestAsync(command, CancellationToken.None);
+        Assert.Equal(DocumentIngestionStatus.Failed, firstResult.Status);
+        Assert.Equal(DocumentIngestionStatus.Failed, repository.SavedDocument!.IngestionStatus);
+
+        // 2. Retry with valid chunker succeeds
+        var validChunker = new FakeDocumentChunker(new List<ChunkData> { new(0, "Valid chunk") });
+        var retryUseCase = new IngestDocumentUseCase(tenantContext, validChunker, repository);
+
+        var retryResult = await retryUseCase.IngestAsync(command, CancellationToken.None);
+
+        Assert.Equal(DocumentIngestionStatus.Completed, retryResult.Status);
+        Assert.Equal(1, retryResult.ChunkCount);
+        Assert.Equal(DocumentIngestionStatus.Completed, repository.SavedDocument!.IngestionStatus);
+        Assert.Null(repository.SavedDocument.FailureReason);
+        Assert.Single(repository.SavedChunks!);
+    }
+
+    [Fact]
+    public async Task Tenant_context_is_still_enforced_during_retry()
+    {
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var repository = new FakeDocumentRepository();
+        var chunker = new FakeDocumentChunker(new List<ChunkData> { new(0, "Chunk text") });
+
+        var useCaseA = new IngestDocumentUseCase(new FakeTenantContext(tenantA), chunker, repository);
+        var command = new IngestDocumentCommand("Tenant Doc", "ref-tenant-retry", "Text");
+
+        var resultA = await useCaseA.IngestAsync(command, CancellationToken.None);
+        Assert.Equal(tenantA, repository.SavedDocument!.TenantId);
+
+        var useCaseB = new IngestDocumentUseCase(new FakeTenantContext(tenantB), chunker, repository);
+        var resultB = await useCaseB.IngestAsync(command, CancellationToken.None);
+        Assert.Equal(tenantB, repository.SavedDocument!.TenantId);
+    }
+
     // --- Stubs / Fakes ---
 
     private sealed class FakeTenantContext(Guid tenantId) : ITenantContext
@@ -99,6 +200,11 @@ public sealed class IngestDocumentUseCaseTests
     private sealed class FakeDocumentChunker(IReadOnlyList<ChunkData> chunksToReturn) : IDocumentChunker
     {
         public IReadOnlyList<ChunkData> Chunk(string normalizedText) => chunksToReturn;
+    }
+
+    private sealed class FakeFailingDocumentChunker(string errorMessage) : IDocumentChunker
+    {
+        public IReadOnlyList<ChunkData> Chunk(string normalizedText) => throw new InvalidOperationException(errorMessage);
     }
 
     private sealed class FakeDocumentRepository : IDocumentRepository

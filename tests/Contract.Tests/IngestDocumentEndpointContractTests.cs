@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using GovernmentDomainCopilot.API.Models;
 using GovernmentDomainCopilot.Application.Documents;
+using GovernmentDomainCopilot.Application.Documents.Models;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -213,5 +214,45 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
         Assert.NotNull(doc);
         Assert.Equal("Multi-chunk Decree", doc.Title);
         Assert.Equal(result.ChunkCount, chunks.Count);
+    }
+
+    [Fact]
+    public async Task Response_never_claims_Completed_on_failure()
+    {
+        var factoryWithFailingChunker = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureServices(services =>
+            {
+                var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IDocumentChunker));
+                if (descriptor != null)
+                {
+                    services.Remove(descriptor);
+                }
+
+                services.AddSingleton<IDocumentChunker>(new FailingStubChunker());
+            });
+        });
+
+        var client = factoryWithFailingChunker.CreateClient();
+        var payload = new IngestDocumentApiRequest("Failing Decree Title", "gov-ref-failing-doc", "Corrupted source text content.");
+
+        var response = await client.PostAsJsonAsync("/api/documents", payload);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+
+        var result = await response.Content.ReadFromJsonAsync<IngestDocumentApiResponse>();
+        Assert.NotNull(result);
+        Assert.NotEqual(Guid.Empty, result.DocumentId);
+        Assert.Equal(0, result.ChunkCount);
+        Assert.Equal("Failed", result.Status);
+        Assert.NotEqual("Completed", result.Status);
+    }
+
+    private sealed class FailingStubChunker : IDocumentChunker
+    {
+        public IReadOnlyList<ChunkData> Chunk(string normalizedText)
+        {
+            throw new InvalidOperationException("Failed to chunk document content due to syntax error.");
+        }
     }
 }

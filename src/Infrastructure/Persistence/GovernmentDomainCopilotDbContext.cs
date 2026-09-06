@@ -55,6 +55,9 @@ public sealed class GovernmentDomainCopilotDbContext(
             .HasConversion<string>()
             .HasMaxLength(50)
             .IsRequired();
+        entity.Property(item => item.FailureReason)
+            .HasMaxLength(Document.MaxFailureReasonLength)
+            .IsRequired(false);
         entity.Property(item => item.CreatedAtUtc).IsRequired();
         entity.HasIndex(item => new { item.TenantId, item.SourceReference }).IsUnique();
     }

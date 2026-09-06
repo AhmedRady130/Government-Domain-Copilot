@@ -2,6 +2,7 @@ using GovernmentDomainCopilot.API.Models;
 using GovernmentDomainCopilot.Application.Documents;
 using GovernmentDomainCopilot.Application.Documents.Commands;
 using GovernmentDomainCopilot.Application.Documents.Validation;
+using GovernmentDomainCopilot.Domain.Entities;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -39,12 +40,22 @@ public static class DocumentEndpoints
             {
                 var result = await useCase.IngestAsync(command, cancellationToken);
 
-                var response = new IngestDocumentApiResponse(
-                    result.DocumentId,
-                    result.ChunkCount,
-                    "Completed");
+                if (result.Status == DocumentIngestionStatus.Completed)
+                {
+                    var response = new IngestDocumentApiResponse(
+                        result.DocumentId,
+                        result.ChunkCount,
+                        "Completed");
 
-                return Results.Created($"/api/documents/{result.DocumentId}", response);
+                    return Results.Created($"/api/documents/{result.DocumentId}", response);
+                }
+
+                var failedResponse = new IngestDocumentApiResponse(
+                    result.DocumentId,
+                    0,
+                    "Failed");
+
+                return Results.UnprocessableEntity(failedResponse);
             }
             catch (IngestionValidationException ex)
             {
@@ -77,6 +88,7 @@ public static class DocumentEndpoints
         })
         .WithName("IngestDocument")
         .Produces<IngestDocumentApiResponse>(StatusCodes.Status201Created)
+        .Produces<IngestDocumentApiResponse>(StatusCodes.Status422UnprocessableEntity)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status500InternalServerError);

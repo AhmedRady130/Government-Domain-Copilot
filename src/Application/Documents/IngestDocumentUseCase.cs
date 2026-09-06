@@ -7,7 +7,7 @@ using GovernmentDomainCopilot.Domain.Entities;
 namespace GovernmentDomainCopilot.Application.Documents;
 
 /// <summary>
-/// Orchestrates the document ingestion use case.
+/// Orchestrates the document ingestion use case with robust failure handling and status reporting.
 /// </summary>
 public sealed class IngestDocumentUseCase : IIngestDocumentUseCase
 {
@@ -31,7 +31,7 @@ public sealed class IngestDocumentUseCase : IIngestDocumentUseCase
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        // 1. Validate request payload constraints
+        // 1. Validate request payload constraints (occurs before persistence)
         var validationErrors = IngestDocumentCommandValidator.Validate(command);
         if (validationErrors.Count > 0)
         {
@@ -45,14 +45,7 @@ public sealed class IngestDocumentUseCase : IIngestDocumentUseCase
             throw new InvalidOperationException("Authenticated tenant context is missing or invalid.");
         }
 
-        // 3. Chunk source text
-        var chunkDataList = _chunker.Chunk(command.SourceText);
-        if (chunkDataList.Count == 0)
-        {
-            throw new InvalidOperationException("Document chunker produced no valid content chunks.");
-        }
-
-        // 4. Create Domain entities owned by current tenant
+        // 3. Instantiate Document entity starting in Pending status
         var documentId = Guid.NewGuid();
         var document = new Document(
             documentId,
@@ -62,15 +55,76 @@ public sealed class IngestDocumentUseCase : IIngestDocumentUseCase
             DateTimeOffset.UtcNow,
             DocumentIngestionStatus.Pending);
 
+        // 4. Perform chunking & normalization with controlled failure handling
+        IReadOnlyList<ChunkData> chunkDataList;
+        try
+        {
+            chunkDataList = _chunker.Chunk(command.SourceText);
+            if (chunkDataList == null || chunkDataList.Count == 0)
+            {
+                var failureReason = "Document chunker produced no valid content chunks.";
+                document.MarkAsFailed(failureReason);
+                await SaveFailedDocumentAsync(document, cancellationToken);
+                return new IngestDocumentResult(document.Id, 0, DocumentIngestionStatus.Failed, failureReason);
+            }
+        }
+        catch (Exception ex)
+        {
+            var failureReason = $"Chunking processing failed: {ex.Message}";
+            document.MarkAsFailed(failureReason);
+            await SaveFailedDocumentAsync(document, cancellationToken);
+            return new IngestDocumentResult(document.Id, 0, DocumentIngestionStatus.Failed, document.FailureReason);
+        }
+
+        // 5. Build chunks for completed document
         var chunks = chunkDataList
             .Select(c => new DocumentChunk(Guid.NewGuid(), tenantId, documentId, c.Sequence, c.Content))
             .ToList();
 
-        // 5. Transition document status to Completed and persist document + chunks atomically
+        // 6. Transition document to Completed status and attempt atomic save
         document.MarkAsCompleted();
-        await _repository.SaveAsync(document, chunks, cancellationToken);
 
-        // 6. Return typed use-case result
-        return new IngestDocumentResult(document.Id, chunks.Count);
+        try
+        {
+            await _repository.SaveAsync(document, chunks, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // If completed persistence fails, attempt safe transition to Failed so document doesn't remain Pending
+            try
+            {
+                var failedDoc = new Document(
+                    documentId,
+                    tenantId,
+                    command.Title.Trim(),
+                    command.SourceReference.Trim(),
+                    document.CreatedAtUtc,
+                    DocumentIngestionStatus.Pending);
+
+                failedDoc.MarkAsFailed($"Persistence failed: {ex.Message}");
+                await SaveFailedDocumentAsync(failedDoc, cancellationToken);
+            }
+            catch
+            {
+                // Ignore secondary save errors so primary exception propagates cleanly
+            }
+
+            throw;
+        }
+
+        // 7. Return typed use-case result
+        return new IngestDocumentResult(document.Id, chunks.Count, DocumentIngestionStatus.Completed);
+    }
+
+    private async Task SaveFailedDocumentAsync(Document document, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _repository.SaveAsync(document, Array.Empty<DocumentChunk>(), cancellationToken);
+        }
+        catch
+        {
+            // Best effort persistence of failure state
+        }
     }
 }
