@@ -24,23 +24,28 @@ public sealed class DocumentRepository : IDocumentRepository
     {
         ArgumentNullException.ThrowIfNull(document);
 
-        if (chunks == null || chunks.Count == 0)
+        var safeChunks = chunks ?? Array.Empty<DocumentChunk>();
+
+        if (document.IngestionStatus != DocumentIngestionStatus.Failed && safeChunks.Count == 0)
         {
-            throw new ArgumentException("Chunks list cannot be null or empty.", nameof(chunks));
+            throw new ArgumentException("Chunks list cannot be null or empty for non-failed documents.", nameof(chunks));
         }
 
-        // Multi-tenancy guard: verify all chunks belong to the document's TenantId
-        if (chunks.Any(c => c.TenantId != document.TenantId))
+        if (safeChunks.Count > 0)
         {
-            throw new InvalidOperationException(
-                "Cross-tenant chunk persistence attempt detected. All chunks must match the document TenantId.");
-        }
+            // Multi-tenancy guard: verify all chunks belong to the document's TenantId
+            if (safeChunks.Any(c => c.TenantId != document.TenantId))
+            {
+                throw new InvalidOperationException(
+                    "Cross-tenant chunk persistence attempt detected. All chunks must match the document TenantId.");
+            }
 
-        // Parent relationship guard: verify all chunks reference the document's Id
-        if (chunks.Any(c => c.DocumentId != document.Id))
-        {
-            throw new InvalidOperationException(
-                "All chunks must reference the document ID being persisted.");
+            // Parent relationship guard: verify all chunks reference the document's Id
+            if (safeChunks.Any(c => c.DocumentId != document.Id))
+            {
+                throw new InvalidOperationException(
+                    "All chunks must reference the document ID being persisted.");
+            }
         }
 
         var executionStrategy = _context.Database.CreateExecutionStrategy();
@@ -66,19 +71,28 @@ public sealed class DocumentRepository : IDocumentRepository
                 if (existingDocument.Id == document.Id)
                 {
                     _context.Entry(existingDocument).CurrentValues.SetValues(document);
-                    _context.DocumentChunks.AddRange(chunks);
+                    if (safeChunks.Count > 0)
+                    {
+                        _context.DocumentChunks.AddRange(safeChunks);
+                    }
                 }
                 else
                 {
                     _context.Documents.Remove(existingDocument);
                     _context.Documents.Add(document);
-                    _context.DocumentChunks.AddRange(chunks);
+                    if (safeChunks.Count > 0)
+                    {
+                        _context.DocumentChunks.AddRange(safeChunks);
+                    }
                 }
             }
             else
             {
                 _context.Documents.Add(document);
-                _context.DocumentChunks.AddRange(chunks);
+                if (safeChunks.Count > 0)
+                {
+                    _context.DocumentChunks.AddRange(safeChunks);
+                }
             }
 
             await _context.SaveChangesAsync(cancellationToken);

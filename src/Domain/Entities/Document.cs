@@ -2,13 +2,19 @@ namespace GovernmentDomainCopilot.Domain.Entities;
 
 public sealed class Document : TenantOwnedEntity
 {
+    /// <summary>
+    /// Maximum allowed length in characters for a failure reason description.
+    /// </summary>
+    public const int MaxFailureReasonLength = 500;
+
     public Document(
         Guid id,
         Guid tenantId,
         string title,
         string sourceReference,
         DateTimeOffset createdAtUtc,
-        DocumentIngestionStatus ingestionStatus = DocumentIngestionStatus.Pending)
+        DocumentIngestionStatus ingestionStatus = DocumentIngestionStatus.Pending,
+        string? failureReason = null)
         : base(id, tenantId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
@@ -23,6 +29,9 @@ public sealed class Document : TenantOwnedEntity
         SourceReference = sourceReference;
         CreatedAtUtc = createdAtUtc;
         IngestionStatus = ingestionStatus;
+        FailureReason = ingestionStatus == DocumentIngestionStatus.Failed
+            ? SanitizeFailureReason(failureReason)
+            : null;
     }
 
     public string Title { get; private set; }
@@ -33,8 +42,10 @@ public sealed class Document : TenantOwnedEntity
 
     public DocumentIngestionStatus IngestionStatus { get; private set; }
 
+    public string? FailureReason { get; private set; }
+
     /// <summary>
-    /// Transitions the document ingestion status to <see cref="DocumentIngestionStatus.Completed"/>.
+    /// Transitions the document ingestion status to <see cref="DocumentIngestionStatus.Completed"/> and clears failure reason.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown when the current status does not permit transitioning to Completed.</exception>
     public void MarkAsCompleted()
@@ -43,21 +54,23 @@ public sealed class Document : TenantOwnedEntity
     }
 
     /// <summary>
-    /// Transitions the document ingestion status to <see cref="DocumentIngestionStatus.Failed"/>.
+    /// Transitions the document ingestion status to <see cref="DocumentIngestionStatus.Failed"/> with an optional safe failure reason.
     /// </summary>
+    /// <param name="failureReason">Optional diagnostic reason describing why ingestion failed.</param>
     /// <exception cref="InvalidOperationException">Thrown when the current status does not permit transitioning to Failed.</exception>
-    public void MarkAsFailed()
+    public void MarkAsFailed(string? failureReason = null)
     {
-        TransitionTo(DocumentIngestionStatus.Failed);
+        TransitionTo(DocumentIngestionStatus.Failed, failureReason);
     }
 
     /// <summary>
     /// Transitions the document ingestion status to <paramref name="newStatus"/>.
     /// </summary>
     /// <param name="newStatus">The target ingestion status.</param>
+    /// <param name="failureReason">Optional failure reason if transitioning to Failed.</param>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="newStatus"/> is an undefined enum value.</exception>
     /// <exception cref="InvalidOperationException">Thrown when the transition is invalid according to domain lifecycle rules.</exception>
-    public void TransitionTo(DocumentIngestionStatus newStatus)
+    public void TransitionTo(DocumentIngestionStatus newStatus, string? failureReason = null)
     {
         if (!Enum.IsDefined(newStatus))
         {
@@ -71,5 +84,37 @@ public sealed class Document : TenantOwnedEntity
         }
 
         IngestionStatus = newStatus;
+        FailureReason = newStatus == DocumentIngestionStatus.Failed
+            ? SanitizeFailureReason(failureReason)
+            : null;
+    }
+
+    private static string? SanitizeFailureReason(string? reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return "Ingestion processing failed.";
+        }
+
+        var clean = reason.Trim();
+
+        var stackTraceIdx = clean.IndexOf("\n   at ", StringComparison.Ordinal);
+        if (stackTraceIdx >= 0)
+        {
+            clean = clean[..stackTraceIdx].Trim();
+        }
+
+        stackTraceIdx = clean.IndexOf("   at ", StringComparison.Ordinal);
+        if (stackTraceIdx >= 0)
+        {
+            clean = clean[..stackTraceIdx].Trim();
+        }
+
+        if (clean.Length > MaxFailureReasonLength)
+        {
+            clean = clean[..MaxFailureReasonLength];
+        }
+
+        return clean;
     }
 }

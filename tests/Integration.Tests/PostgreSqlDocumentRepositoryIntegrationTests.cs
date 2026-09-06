@@ -229,6 +229,125 @@ public sealed class PostgreSqlDocumentRepositoryIntegrationTests : IClassFixture
     }
 
     [Fact]
+    public async Task Failed_persistence_leaves_no_orphaned_chunks()
+    {
+        using var context = _fixture.CreateDbContext();
+        var tenant = await CreateTenantAsync(context);
+        var repository = new DocumentRepository(context);
+
+        var sourceRef = "ref-fail-no-orphans";
+
+        // 1. Initial attempt persists completed document with 2 chunks
+        var docCompleted = new Document(Guid.NewGuid(), tenant.Id, "Initial Decree", sourceRef, DateTimeOffset.UtcNow);
+        docCompleted.MarkAsCompleted();
+        var chunks = new List<DocumentChunk>
+        {
+            new(Guid.NewGuid(), tenant.Id, docCompleted.Id, 0, "Chunk 0"),
+            new(Guid.NewGuid(), tenant.Id, docCompleted.Id, 1, "Chunk 1")
+        };
+        await repository.SaveAsync(docCompleted, chunks, CancellationToken.None);
+
+        var initialChunks = await repository.GetChunksByDocumentIdAsync(tenant.Id, docCompleted.Id, CancellationToken.None);
+        Assert.Equal(2, initialChunks.Count);
+
+        // 2. Subsequent attempt fails; save failed document with 0 chunks
+        var docFailed = new Document(Guid.NewGuid(), tenant.Id, "Initial Decree Failed", sourceRef, DateTimeOffset.UtcNow);
+        docFailed.MarkAsFailed("Processing error occurred");
+        await repository.SaveAsync(docFailed, Array.Empty<DocumentChunk>(), CancellationToken.None);
+
+        // 3. Verify no chunks remain in the database for this document identity
+        var postFailChunks = await repository.GetChunksByDocumentIdAsync(tenant.Id, docFailed.Id, CancellationToken.None);
+        Assert.Empty(postFailChunks);
+
+        var docFromDb = await repository.GetBySourceReferenceAsync(tenant.Id, sourceRef, CancellationToken.None);
+        Assert.NotNull(docFromDb);
+        Assert.Equal(DocumentIngestionStatus.Failed, docFromDb.IngestionStatus);
+    }
+
+    [Fact]
+    public async Task Repeated_retry_remains_idempotent()
+    {
+        using var context = _fixture.CreateDbContext();
+        var tenant = await CreateTenantAsync(context);
+        var repository = new DocumentRepository(context);
+
+        var sourceRef = "ref-repeated-retry";
+
+        // Perform multiple failed & successful ingestion attempts for the exact same TenantId and SourceReference
+        for (int i = 0; i < 3; i++)
+        {
+            var failedDoc = new Document(Guid.NewGuid(), tenant.Id, $"Draft attempt {i}", sourceRef, DateTimeOffset.UtcNow);
+            failedDoc.MarkAsFailed($"Attempt {i} failed");
+            await repository.SaveAsync(failedDoc, Array.Empty<DocumentChunk>(), CancellationToken.None);
+        }
+
+        var docCountAfterFails = await context.Documents
+            .CountAsync(d => d.TenantId == tenant.Id && d.SourceReference == sourceRef);
+        Assert.Equal(1, docCountAfterFails);
+
+        // Successful retry
+        var successDoc = new Document(Guid.NewGuid(), tenant.Id, "Final Successful Decree", sourceRef, DateTimeOffset.UtcNow);
+        successDoc.MarkAsCompleted();
+        var finalChunks = new List<DocumentChunk>
+        {
+            new(Guid.NewGuid(), tenant.Id, successDoc.Id, 0, "Final Chunk 0")
+        };
+        await repository.SaveAsync(successDoc, finalChunks, CancellationToken.None);
+
+        var finalDocCount = await context.Documents
+            .CountAsync(d => d.TenantId == tenant.Id && d.SourceReference == sourceRef);
+        Assert.Equal(1, finalDocCount);
+
+        var retrievedDoc = await repository.GetBySourceReferenceAsync(tenant.Id, sourceRef, CancellationToken.None);
+        Assert.NotNull(retrievedDoc);
+        Assert.Equal(DocumentIngestionStatus.Completed, retrievedDoc.IngestionStatus);
+    }
+
+    [Fact]
+    public async Task Failed_then_successful_ingestion_leaves_exactly_one_active_document_and_the_expected_chunks()
+    {
+        using var context = _fixture.CreateDbContext();
+        var tenant = await CreateTenantAsync(context);
+        var repository = new DocumentRepository(context);
+
+        var sourceRef = "ref-fail-then-success";
+
+        // 1. Initial attempt fails
+        var failedDoc = new Document(Guid.NewGuid(), tenant.Id, "Failed Attempt Title", sourceRef, DateTimeOffset.UtcNow);
+        failedDoc.MarkAsFailed("Chunker error");
+        await repository.SaveAsync(failedDoc, Array.Empty<DocumentChunk>(), CancellationToken.None);
+
+        var docAfterFail = await repository.GetBySourceReferenceAsync(tenant.Id, sourceRef, CancellationToken.None);
+        Assert.NotNull(docAfterFail);
+        Assert.Equal(DocumentIngestionStatus.Failed, docAfterFail.IngestionStatus);
+        Assert.Equal("Chunker error", docAfterFail.FailureReason);
+
+        // 2. Successful retry
+        var successDoc = new Document(Guid.NewGuid(), tenant.Id, "Completed Title", sourceRef, DateTimeOffset.UtcNow);
+        successDoc.MarkAsCompleted();
+        var chunks = new List<DocumentChunk>
+        {
+            new(Guid.NewGuid(), tenant.Id, successDoc.Id, 0, "Chunk content 0"),
+            new(Guid.NewGuid(), tenant.Id, successDoc.Id, 1, "Chunk content 1")
+        };
+        await repository.SaveAsync(successDoc, chunks, CancellationToken.None);
+
+        // 3. Verify exactly 1 document exists for source reference and status is Completed with expected chunks
+        var allDocsForRef = await context.Documents
+            .Where(d => d.TenantId == tenant.Id && d.SourceReference == sourceRef)
+            .ToListAsync();
+        Assert.Single(allDocsForRef);
+
+        var activeDoc = allDocsForRef[0];
+        Assert.Equal(DocumentIngestionStatus.Completed, activeDoc.IngestionStatus);
+        Assert.Null(activeDoc.FailureReason);
+
+        var activeChunks = await repository.GetChunksByDocumentIdAsync(tenant.Id, activeDoc.Id, CancellationToken.None);
+        Assert.Equal(2, activeChunks.Count);
+        Assert.Equal("Chunk content 0", activeChunks[0].Content);
+    }
+
+    [Fact]
     public async Task Migrations_initialize_test_database_cleanly()
     {
         using var context = _fixture.CreateDbContext();
