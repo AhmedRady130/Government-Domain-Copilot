@@ -3,9 +3,11 @@ using GovernmentDomainCopilot.Application.Documents;
 using GovernmentDomainCopilot.Application.Documents.Abstractions;
 using GovernmentDomainCopilot.Application.Embeddings.Abstractions;
 using GovernmentDomainCopilot.Application.Embeddings.Models;
+using GovernmentDomainCopilot.Application.Retrieval.Abstractions;
 using GovernmentDomainCopilot.Infrastructure.Documents;
 using GovernmentDomainCopilot.Infrastructure.Embeddings.Providers;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
+using GovernmentDomainCopilot.Infrastructure.Retrieval;
 using GovernmentDomainCopilot.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -39,6 +41,7 @@ public static class DependencyInjection
         services.AddScoped<DocumentRepository>();
         services.AddScoped<IDocumentRepository>(sp => sp.GetRequiredService<DocumentRepository>());
         services.AddScoped<IChunkEmbeddingRepository>(sp => sp.GetRequiredService<DocumentRepository>());
+        services.AddScoped<IChunkRetriever, PgVectorChunkRetriever>();
 
         services.AddHttpClient<GeminiEmbeddingProvider>();
         services.AddHttpClient<OllamaEmbeddingProvider>();
