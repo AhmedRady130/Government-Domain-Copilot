@@ -24,6 +24,13 @@ public static class DependencyInjection
         services.AddSingleton<IEvidenceSufficiencyPolicy, EvidenceSufficiencyPolicy>();
         services.AddSingleton<ICitationValidator, CitationValidator>();
         services.AddScoped<IGroundedAnswerUseCase, GroundedAnswerUseCase>();
+
+        // Evaluation services
+        services.AddSingleton<GovernmentDomainCopilot.Application.Evaluation.Abstractions.IGoldenDatasetLoader, GovernmentDomainCopilot.Application.Evaluation.Services.GoldenDatasetLoader>();
+        services.AddSingleton<GovernmentDomainCopilot.Application.Evaluation.Abstractions.IEvaluationMetricCalculator, GovernmentDomainCopilot.Application.Evaluation.Services.EvaluationMetricCalculator>();
+        services.AddSingleton<GovernmentDomainCopilot.Application.Evaluation.Abstractions.IEvaluationTenantContext, GovernmentDomainCopilot.Application.Evaluation.Services.EvaluationTenantContext>();
+        services.AddScoped<GovernmentDomainCopilot.Application.Evaluation.Abstractions.IEvaluationHarness, GovernmentDomainCopilot.Application.Evaluation.Services.EvaluationHarness>();
+
         return services;
     }
 }
