@@ -1,6 +1,7 @@
 using GovernmentDomainCopilot.Application.Abstractions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 
 namespace GovernmentDomainCopilot.Infrastructure.Tenancy;
 
@@ -9,27 +10,33 @@ namespace GovernmentDomainCopilot.Infrastructure.Tenancy;
 /// </summary>
 /// <remarks>
 /// IMPORTANT: This is a development-only tenant context for the unauthenticated foundation phase.
-/// Sourced from:
-/// 1. HTTP request header <c>X-Tenant-ID</c> (used for multi-tenancy integration/contract testing).
-/// 2. Configuration setting <c>Tenant:DevelopmentTenantId</c>.
-/// 3. Default fallback GUID (<c>11111111-1111-1111-1111-111111111111</c>).
+/// Sourced strictly from configuration:
+/// 1. Configuration setting <c>Tenant:DevelopmentTenantId</c>.
+/// 2. Default fallback GUID (<c>11111111-1111-1111-1111-111111111111</c>).
 ///
-/// Under no circumstances is tenant identity accepted from client request DTO bodies.
-/// Real authenticated identity claim resolution (e.g. JWT) will replace this in a future security phase.
+/// Security Guard:
+/// - Cannot be used outside Development environment (enforced by IHostEnvironment guard).
+/// - Client-supplied headers (e.g. <c>X-Tenant-ID</c>) or request bodies are NEVER treated as authoritative.
+/// - The configured development tenant is the only authoritative identity.
 /// </remarks>
 public sealed class DevelopmentTenantContext : ITenantContext
 {
     public const string HeaderName = "X-Tenant-ID";
     public static readonly Guid DefaultDevelopmentTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
-    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly Guid _configuredTenantId;
 
     public DevelopmentTenantContext(
-        IHttpContextAccessor httpContextAccessor,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IHostEnvironment? environment = null,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
-        _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        if (environment != null && !environment.IsDevelopment())
+        {
+            throw new InvalidOperationException("DevelopmentTenantContext must not be used outside Development environment.");
+        }
 
         var tenantIdString = configuration["Tenant:DevelopmentTenantId"];
         if (Guid.TryParse(tenantIdString, out var parsedConfigId) && parsedConfigId != Guid.Empty)
@@ -42,17 +49,17 @@ public sealed class DevelopmentTenantContext : ITenantContext
         }
     }
 
+    public DevelopmentTenantContext(
+        IHttpContextAccessor httpContextAccessor,
+        IConfiguration configuration)
+        : this(configuration, null, httpContextAccessor)
+    {
+    }
+
     public Guid GetTenantId()
     {
-        var httpContext = _httpContextAccessor.HttpContext;
-        if (httpContext != null && httpContext.Request.Headers.TryGetValue(HeaderName, out var headerValue))
-        {
-            if (Guid.TryParse(headerValue.ToString(), out var headerTenantId) && headerTenantId != Guid.Empty)
-            {
-                return headerTenantId;
-            }
-        }
-
+        // Multi-tenancy security: client-supplied headers (e.g. X-Tenant-ID) are NEVER authoritative.
+        // The configured development tenant is the only authoritative identity.
         return _configuredTenantId;
     }
 }
