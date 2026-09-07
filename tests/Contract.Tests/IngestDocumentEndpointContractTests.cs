@@ -38,6 +38,23 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
                     options.UseInMemoryDatabase(dbName)
                            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning));
                 });
+
+                var retrieverDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(GovernmentDomainCopilot.Application.Retrieval.Abstractions.IChunkRetriever));
+                if (retrieverDescriptor != null) services.Remove(retrieverDescriptor);
+
+                var keywordRetrieverDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(GovernmentDomainCopilot.Application.Retrieval.Abstractions.IKeywordChunkRetriever));
+                if (keywordRetrieverDescriptor != null) services.Remove(keywordRetrieverDescriptor);
+
+                var embeddingServiceDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(GovernmentDomainCopilot.Application.Embeddings.Abstractions.IEmbeddingService));
+                if (embeddingServiceDescriptor != null) services.Remove(embeddingServiceDescriptor);
+
+                var completionProviderDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(GovernmentDomainCopilot.Application.Answering.Abstractions.IChatCompletionProvider));
+                if (completionProviderDescriptor != null) services.Remove(completionProviderDescriptor);
+
+                services.AddScoped<GovernmentDomainCopilot.Application.Retrieval.Abstractions.IChunkRetriever, StubChunkRetriever>();
+                services.AddScoped<GovernmentDomainCopilot.Application.Retrieval.Abstractions.IKeywordChunkRetriever, StubKeywordChunkRetriever>();
+                services.AddScoped<GovernmentDomainCopilot.Application.Embeddings.Abstractions.IEmbeddingService, StubEmbeddingService>();
+                services.AddSingleton<GovernmentDomainCopilot.Application.Answering.Abstractions.IChatCompletionProvider, StubChatCompletionProvider>();
             });
         });
     }
@@ -153,12 +170,12 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
     }
 
     [Fact]
-    public async Task Server_tenant_context_header_determines_persisted_tenant_identity()
+    public async Task Client_supplied_header_cannot_override_configured_development_tenant_identity()
     {
         var client = _factory.CreateClient();
-        var expectedHeaderTenantId = Guid.NewGuid();
+        var spoofedHeaderTenantId = Guid.NewGuid();
 
-        client.DefaultRequestHeaders.Add("X-Tenant-ID", expectedHeaderTenantId.ToString());
+        client.DefaultRequestHeaders.Add("X-Tenant-ID", spoofedHeaderTenantId.ToString());
 
         var payload = new IngestDocumentApiRequest("Header Tenant Doc", "gov-ref-header-tenant", "Content for header tenant doc.");
         var response = await client.PostAsJsonAsync("/api/documents", payload);
@@ -170,9 +187,15 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
         using var scope = _factory.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
 
-        var docWithHeaderTenant = await repo.GetByIdAsync(expectedHeaderTenantId, result.DocumentId, CancellationToken.None);
-        Assert.NotNull(docWithHeaderTenant);
-        Assert.Equal(expectedHeaderTenantId, docWithHeaderTenant.TenantId);
+        // Spoofed tenant ID must NOT have the document
+        var docWithSpoofedTenant = await repo.GetByIdAsync(spoofedHeaderTenantId, result.DocumentId, CancellationToken.None);
+        Assert.Null(docWithSpoofedTenant);
+
+        // Document must be persisted under the authoritative configured development tenant
+        var defaultTenantId = GovernmentDomainCopilot.Infrastructure.Tenancy.DevelopmentTenantContext.DefaultDevelopmentTenantId;
+        var docWithAuthoritativeTenant = await repo.GetByIdAsync(defaultTenantId, result.DocumentId, CancellationToken.None);
+        Assert.NotNull(docWithAuthoritativeTenant);
+        Assert.Equal(defaultTenantId, docWithAuthoritativeTenant.TenantId);
     }
 
     [Fact]
@@ -195,8 +218,7 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
     public async Task Ingestion_produces_expected_document_and_chunk_count_in_persistence()
     {
         var client = _factory.CreateClient();
-        var tenantId = Guid.NewGuid();
-        client.DefaultRequestHeaders.Add("X-Tenant-ID", tenantId.ToString());
+        var defaultTenantId = GovernmentDomainCopilot.Infrastructure.Tenancy.DevelopmentTenantContext.DefaultDevelopmentTenantId;
 
         var payload = new IngestDocumentApiRequest("Multi-chunk Decree", "gov-ref-multi-chunk", "Chunk 1 text.\n\nChunk 2 text.\n\nChunk 3 text.");
         var response = await client.PostAsJsonAsync("/api/documents", payload);
@@ -208,8 +230,8 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
         using var scope = _factory.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
 
-        var doc = await repo.GetByIdAsync(tenantId, result.DocumentId, CancellationToken.None);
-        var chunks = await repo.GetChunksByDocumentIdAsync(tenantId, result.DocumentId, CancellationToken.None);
+        var doc = await repo.GetByIdAsync(defaultTenantId, result.DocumentId, CancellationToken.None);
+        var chunks = await repo.GetChunksByDocumentIdAsync(defaultTenantId, result.DocumentId, CancellationToken.None);
 
         Assert.NotNull(doc);
         Assert.Equal("Multi-chunk Decree", doc.Title);
@@ -254,5 +276,34 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
         {
             throw new InvalidOperationException("Failed to chunk document content due to syntax error.");
         }
+    }
+
+    private sealed class StubChunkRetriever : GovernmentDomainCopilot.Application.Retrieval.Abstractions.IChunkRetriever
+    {
+        public Task<IReadOnlyList<GovernmentDomainCopilot.Application.Retrieval.Models.VectorSearchResultItem>> SearchVectorAsync(
+            Guid tenantId, float[] queryVector, int topK, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<GovernmentDomainCopilot.Application.Retrieval.Models.VectorSearchResultItem>>(Array.Empty<GovernmentDomainCopilot.Application.Retrieval.Models.VectorSearchResultItem>());
+    }
+
+    private sealed class StubKeywordChunkRetriever : GovernmentDomainCopilot.Application.Retrieval.Abstractions.IKeywordChunkRetriever
+    {
+        public Task<IReadOnlyList<GovernmentDomainCopilot.Application.Retrieval.Models.KeywordSearchResultItem>> SearchKeywordAsync(
+            Guid tenantId, string query, int topK, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<GovernmentDomainCopilot.Application.Retrieval.Models.KeywordSearchResultItem>>(Array.Empty<GovernmentDomainCopilot.Application.Retrieval.Models.KeywordSearchResultItem>());
+    }
+
+    private sealed class StubEmbeddingService : GovernmentDomainCopilot.Application.Embeddings.Abstractions.IEmbeddingService
+    {
+        public Task<GovernmentDomainCopilot.Application.Embeddings.Models.EmbeddingResult> GenerateEmbeddingsAsync(
+            GovernmentDomainCopilot.Application.Embeddings.Models.EmbeddingRequest request, CancellationToken cancellationToken) =>
+            Task.FromResult(new GovernmentDomainCopilot.Application.Embeddings.Models.EmbeddingResult("Stub", "stub", 768, Array.Empty<GovernmentDomainCopilot.Application.Embeddings.Models.EmbeddingItem>(), TimeSpan.FromMilliseconds(1)));
+    }
+
+    private sealed class StubChatCompletionProvider : GovernmentDomainCopilot.Application.Answering.Abstractions.IChatCompletionProvider
+    {
+        public string ProviderName => "Gemini";
+        public Task<GovernmentDomainCopilot.Application.Answering.Models.ChatCompletionResult> CompleteAsync(
+            GovernmentDomainCopilot.Application.Answering.Models.ChatCompletionRequest request, CancellationToken cancellationToken) =>
+            Task.FromResult(new GovernmentDomainCopilot.Application.Answering.Models.ChatCompletionResult("Stub [1].", "Gemini", "gemini-2.5-flash", TimeSpan.FromMilliseconds(1)));
     }
 }

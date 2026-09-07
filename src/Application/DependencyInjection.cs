@@ -1,3 +1,5 @@
+using GovernmentDomainCopilot.Application.Answering.Abstractions;
+using GovernmentDomainCopilot.Application.Answering.Services;
 using GovernmentDomainCopilot.Application.Documents;
 using GovernmentDomainCopilot.Application.Embeddings;
 using GovernmentDomainCopilot.Application.Embeddings.Abstractions;
@@ -19,6 +21,9 @@ public static class DependencyInjection
         services.AddSingleton<ReciprocalRankFusionService>();
         services.AddSingleton<IRetrievalReranker, WeightedSignalReranker>();
         services.AddScoped<IHybridSearchUseCase, HybridSearchUseCase>();
+        services.AddSingleton<IEvidenceSufficiencyPolicy, EvidenceSufficiencyPolicy>();
+        services.AddSingleton<ICitationValidator, CitationValidator>();
+        services.AddScoped<IGroundedAnswerUseCase, GroundedAnswerUseCase>();
         return services;
     }
 }

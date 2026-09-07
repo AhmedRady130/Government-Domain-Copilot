@@ -11,6 +11,7 @@ var app = builder.Build();
 
 app.MapDocumentEndpoints();
 app.MapSearchEndpoints();
+app.MapAnswerEndpoints();
 
 app.Run();
 

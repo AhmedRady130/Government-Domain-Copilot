@@ -6,6 +6,7 @@ using GovernmentDomainCopilot.Application.Embeddings.Models;
 using GovernmentDomainCopilot.Application.Retrieval.Abstractions;
 using GovernmentDomainCopilot.Infrastructure.Documents;
 using GovernmentDomainCopilot.Infrastructure.Embeddings.Providers;
+using GovernmentDomainCopilot.Infrastructure.LLM.Providers;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using GovernmentDomainCopilot.Infrastructure.Retrieval;
 using GovernmentDomainCopilot.Infrastructure.Tenancy;
@@ -34,6 +35,9 @@ public static class DependencyInjection
         services.Configure<EmbeddingProviderOptions>(
             configuration.GetSection(EmbeddingProviderOptions.SectionName));
 
+        services.Configure<LlmProviderOptions>(
+            configuration.GetSection(LlmProviderOptions.SectionName));
+
         services.AddHttpContextAccessor();
         services.AddScoped<ITenantContext, DevelopmentTenantContext>();
 
@@ -46,9 +50,19 @@ public static class DependencyInjection
 
         services.AddHttpClient<GeminiEmbeddingProvider>();
         services.AddHttpClient<OllamaEmbeddingProvider>();
+        services.AddHttpClient<GeminiChatCompletionProvider>((sp, client) =>
+        {
+            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LlmProviderOptions>>().Value;
+            if (options.HttpTimeoutSeconds > 0)
+            {
+                client.Timeout = TimeSpan.FromSeconds(options.HttpTimeoutSeconds);
+            }
+        });
 
         services.AddSingleton<IEmbeddingProvider, GeminiEmbeddingProvider>();
         services.AddSingleton<IEmbeddingProvider, OllamaEmbeddingProvider>();
+        services.AddScoped<GovernmentDomainCopilot.Application.Answering.Abstractions.IChatCompletionProvider>(sp =>
+            sp.GetRequiredService<GeminiChatCompletionProvider>());
 
         return services;
     }
