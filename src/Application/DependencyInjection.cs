@@ -31,6 +31,20 @@ public static class DependencyInjection
         services.AddSingleton<GovernmentDomainCopilot.Application.Evaluation.Abstractions.IEvaluationTenantContext, GovernmentDomainCopilot.Application.Evaluation.Services.EvaluationTenantContext>();
         services.AddScoped<GovernmentDomainCopilot.Application.Evaluation.Abstractions.IEvaluationHarness, GovernmentDomainCopilot.Application.Evaluation.Services.EvaluationHarness>();
 
+        // Multi-Agent Orchestration & Human Approval services (FR-4 & FR-5)
+        services.AddSingleton<GovernmentDomainCopilot.Application.Agents.Abstractions.IApprovalManager, GovernmentDomainCopilot.Application.Agents.Services.InMemoryApprovalManager>();
+
+        services.AddScoped<GovernmentDomainCopilot.Application.Agents.Abstractions.IAgentTool, GovernmentDomainCopilot.Application.Agents.Tools.DocumentSearchTool>();
+        services.AddScoped<GovernmentDomainCopilot.Application.Agents.Abstractions.IAgentTool, GovernmentDomainCopilot.Application.Agents.Tools.EligibilityLookupTool>();
+        services.AddScoped<GovernmentDomainCopilot.Application.Agents.Abstractions.IAgentTool, GovernmentDomainCopilot.Application.Agents.Tools.ProcedureLookupTool>();
+        services.AddScoped<GovernmentDomainCopilot.Application.Agents.Abstractions.IAgentTool, GovernmentDomainCopilot.Application.Agents.Tools.DraftApprovalTool>();
+
+        services.AddScoped<GovernmentDomainCopilot.Application.Agents.Abstractions.IAgent, GovernmentDomainCopilot.Application.Agents.Implementations.EligibilityIdentifierAgent>();
+        services.AddScoped<GovernmentDomainCopilot.Application.Agents.Abstractions.IAgent, GovernmentDomainCopilot.Application.Agents.Implementations.ProcedureResolverAgent>();
+        services.AddScoped<GovernmentDomainCopilot.Application.Agents.Abstractions.IAgent, GovernmentDomainCopilot.Application.Agents.Implementations.ResponseDrafterAgent>();
+
+        services.AddScoped<GovernmentDomainCopilot.Application.Agents.Abstractions.IMultiAgentOrchestrator, GovernmentDomainCopilot.Application.Agents.Services.SequentialPipelineOrchestrator>();
+
         return services;
     }
 }
