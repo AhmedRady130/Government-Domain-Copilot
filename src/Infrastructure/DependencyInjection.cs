@@ -38,6 +38,9 @@ public static class DependencyInjection
         services.Configure<LlmProviderOptions>(
             configuration.GetSection(LlmProviderOptions.SectionName));
 
+        services.Configure<GovernmentDomainCopilot.Application.Agents.Models.OrchestrationOptions>(
+            configuration.GetSection(GovernmentDomainCopilot.Application.Agents.Models.OrchestrationOptions.SectionName));
+
         services.AddHttpContextAccessor();
         services.AddScoped<ITenantContext, DevelopmentTenantContext>();
 
