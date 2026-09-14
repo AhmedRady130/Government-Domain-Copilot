@@ -181,7 +181,7 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
                                 message: "Orchestration failed; initiating Plain-RAG fallback."));
 
                             var fallbackResponse = await _groundedAnswerUseCase.GetGroundedAnswerAsync(
-                                new GroundedAnswerRequest(userQuery),
+                                new GroundedAnswerRequest(userQuery, CorrelationId: resolvedCorrelationId, RunId: runId),
                                 sink,
                                 CancellationToken.None);
 
@@ -558,7 +558,7 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
 
             try
             {
-                var fallbackRequest = new GroundedAnswerRequest(userQuery);
+                var fallbackRequest = new GroundedAnswerRequest(userQuery, CorrelationId: resolvedCorrelationId, RunId: runId);
                 finalResponse = await _groundedAnswerUseCase.GetGroundedAnswerAsync(fallbackRequest, CancellationToken.None);
             }
             catch (Exception ex)

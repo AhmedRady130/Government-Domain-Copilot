@@ -19,6 +19,7 @@ public sealed class GovernmentDomainCopilotDbContext(
     public DbSet<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.ConversationSessionEntity> UserSessions => Set<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.ConversationSessionEntity>();
     public DbSet<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.SessionMessageEntity> SessionMessages => Set<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.SessionMessageEntity>();
     public DbSet<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.OrchestrationRunTraceEntity> OrchestrationRunTraces => Set<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.OrchestrationRunTraceEntity>();
+    public DbSet<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.LlmInvocationTraceEntity> LlmInvocationTraces => Set<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.LlmInvocationTraceEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -40,6 +41,7 @@ public sealed class GovernmentDomainCopilotDbContext(
         ConfigureUserSession(modelBuilder.Entity<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.ConversationSessionEntity>(), isNpgsql);
         ConfigureSessionMessage(modelBuilder.Entity<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.SessionMessageEntity>(), isNpgsql);
         ConfigureOrchestrationRunTrace(modelBuilder.Entity<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.OrchestrationRunTraceEntity>(), isNpgsql);
+        ConfigureLlmInvocationTrace(modelBuilder.Entity<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.LlmInvocationTraceEntity>(), isNpgsql);
     }
 
     private static void ConfigureTenant(EntityTypeBuilder<Tenant> entity)
@@ -284,8 +286,53 @@ public sealed class GovernmentDomainCopilotDbContext(
         }
 
         entity.HasIndex(item => new { item.TenantId, item.RunId }).IsUnique();
+        entity.HasIndex(item => new { item.TenantId, item.CorrelationId });
         entity.HasIndex(item => new { item.TenantId, item.StartedAt });
         entity.HasIndex(item => new { item.TenantId, item.SessionId });
+
+        entity.HasOne<Tenant>()
+            .WithMany()
+            .HasForeignKey(item => item.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private static void ConfigureLlmInvocationTrace(EntityTypeBuilder<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.LlmInvocationTraceEntity> entity, bool isNpgsql)
+    {
+        entity.ToTable("LlmInvocationTraces");
+        entity.HasKey(item => item.Id);
+        entity.Property(item => item.Id).IsRequired();
+        entity.Property(item => item.TenantId).IsRequired();
+        entity.Property(item => item.CorrelationId).HasMaxLength(100).IsRequired();
+        entity.Property(item => item.RunId).HasMaxLength(100).IsRequired(false);
+        entity.Property(item => item.ProviderName).HasMaxLength(100).IsRequired();
+        entity.Property(item => item.ModelName).HasMaxLength(100).IsRequired();
+        entity.Property(item => item.OperationType).HasMaxLength(50).IsRequired();
+        entity.Property(item => item.Duration).IsRequired();
+        entity.Property(item => item.IsSuccess).IsRequired();
+        entity.Property(item => item.ErrorMessage).HasMaxLength(2000).IsRequired(false);
+        entity.Property(item => item.PromptTokens).IsRequired(false);
+        entity.Property(item => item.CompletionTokens).IsRequired(false);
+        entity.Property(item => item.TotalTokens).IsRequired(false);
+        entity.Property(item => item.EstimatedCost).HasColumnType("numeric(18,8)").IsRequired(false);
+
+        if (!isNpgsql)
+        {
+            entity.Property(item => item.StartedAt)
+                .HasConversion(v => v.UtcDateTime, v => new DateTimeOffset(v, TimeSpan.Zero))
+                .IsRequired();
+            entity.Property(item => item.CompletedAt)
+                .HasConversion(v => v.UtcDateTime, v => new DateTimeOffset(v, TimeSpan.Zero))
+                .IsRequired();
+        }
+        else
+        {
+            entity.Property(item => item.StartedAt).IsRequired();
+            entity.Property(item => item.CompletedAt).IsRequired();
+        }
+
+        entity.HasIndex(item => new { item.TenantId, item.CorrelationId });
+        entity.HasIndex(item => new { item.TenantId, item.RunId });
+        entity.HasIndex(item => new { item.TenantId, item.StartedAt });
 
         entity.HasOne<Tenant>()
             .WithMany()

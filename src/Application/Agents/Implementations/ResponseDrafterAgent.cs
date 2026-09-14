@@ -45,7 +45,10 @@ public sealed class ResponseDrafterAgent : IAgent
         _logger.LogInformation("Agent '{Role}' generating grounded response draft...", Role);
 
         // Grounded answer pipeline execution (preserves all grounding, refusal, and citation invariants)
-        var groundedRequest = new GroundedAnswerRequest(context.UserQuery);
+        var groundedRequest = new GroundedAnswerRequest(
+            context.UserQuery,
+            CorrelationId: context.CorrelationId,
+            RunId: context.RunId);
         var groundedResponse = await _groundedAnswerUseCase.GetGroundedAnswerAsync(
             groundedRequest,
             context.EventSink,

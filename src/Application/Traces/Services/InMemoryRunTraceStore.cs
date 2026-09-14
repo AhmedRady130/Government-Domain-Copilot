@@ -72,4 +72,17 @@ public sealed class InMemoryRunTraceStore : IRunTraceStore
 
         return Task.FromResult<IReadOnlyList<OrchestrationRunRecord>>(results);
     }
+
+    public Task<IReadOnlyList<OrchestrationRunRecord>> GetRunsByCorrelationIdAsync(
+        string correlationId,
+        Guid tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        var matches = _runs.Values
+            .Where(r => r.TenantId == tenantId && string.Equals(r.CorrelationId, correlationId, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(r => r.StartedAt)
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<OrchestrationRunRecord>>(matches);
+    }
 }

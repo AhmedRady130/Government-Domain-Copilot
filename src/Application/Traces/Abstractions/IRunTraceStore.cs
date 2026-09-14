@@ -35,4 +35,12 @@ public interface IRunTraceStore
         int take = 50,
         string? sessionId = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retrieves all run traces associated with a given correlation ID for the tenant.
+    /// </summary>
+    Task<IReadOnlyList<OrchestrationRunRecord>> GetRunsByCorrelationIdAsync(
+        string correlationId,
+        Guid tenantId,
+        CancellationToken cancellationToken = default);
 }

@@ -132,6 +132,7 @@ public sealed class GeminiChatCompletionProvider : IChatCompletionProvider
                     responseData.UsageMetadata.PromptTokenCount,
                     responseData.UsageMetadata.CandidatesTokenCount,
                     responseData.UsageMetadata.TotalTokenCount);
+                request.OnUsageResolved?.Invoke(usage);
             }
 
             return new ChatCompletionResult(
@@ -256,6 +257,15 @@ public sealed class GeminiChatCompletionProvider : IChatCompletionProvider
                     catch (System.Text.Json.JsonException)
                     {
                         continue;
+                    }
+
+                    if (chunkObj?.UsageMetadata != null)
+                    {
+                        var usage = new ChatCompletionUsageMetadata(
+                            chunkObj.UsageMetadata.PromptTokenCount,
+                            chunkObj.UsageMetadata.CandidatesTokenCount,
+                            chunkObj.UsageMetadata.TotalTokenCount);
+                        request.OnUsageResolved?.Invoke(usage);
                     }
 
                     var chunkText = chunkObj?.Candidates?.FirstOrDefault()?.Content?.Parts?.FirstOrDefault()?.Text;

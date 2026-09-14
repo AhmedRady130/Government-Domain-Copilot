@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -117,6 +117,25 @@ public sealed class PostgresRunTraceStore : IRunTraceStore
             .ThenBy(r => r.RunId)
             .Skip(skip)
             .Take(take)
+            .ToListAsync(cancellationToken);
+
+        return entities.Select(MapToRecord).ToList();
+    }
+
+    public async Task<IReadOnlyList<OrchestrationRunRecord>> GetRunsByCorrelationIdAsync(
+        string correlationId,
+        Guid tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(correlationId))
+        {
+            return Array.Empty<OrchestrationRunRecord>();
+        }
+
+        var entities = await _dbContext.OrchestrationRunTraces
+            .AsNoTracking()
+            .Where(r => r.TenantId == tenantId && r.CorrelationId == correlationId)
+            .OrderByDescending(r => r.StartedAt)
             .ToListAsync(cancellationToken);
 
         return entities.Select(MapToRecord).ToList();
