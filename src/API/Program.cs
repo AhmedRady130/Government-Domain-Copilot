@@ -4,6 +4,7 @@ using GovernmentDomainCopilot.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -13,6 +14,8 @@ app.MapDocumentEndpoints();
 app.MapSearchEndpoints();
 app.MapAnswerEndpoints();
 app.MapOrchestrationEndpoints();
+app.MapRunEndpoints();
+app.MapSessionEndpoints();
 
 app.Run();
 

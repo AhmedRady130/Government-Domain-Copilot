@@ -16,6 +16,9 @@ public sealed class GovernmentDomainCopilotDbContext(
     public DbSet<Run> Runs => Set<Run>();
     public DbSet<Approval> Approvals => Set<Approval>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.ConversationSessionEntity> UserSessions => Set<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.ConversationSessionEntity>();
+    public DbSet<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.SessionMessageEntity> SessionMessages => Set<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.SessionMessageEntity>();
+    public DbSet<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.OrchestrationRunTraceEntity> OrchestrationRunTraces => Set<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.OrchestrationRunTraceEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -34,6 +37,9 @@ public sealed class GovernmentDomainCopilotDbContext(
         ConfigureRun(modelBuilder.Entity<Run>());
         ConfigureApproval(modelBuilder.Entity<Approval>());
         ConfigureAuditLog(modelBuilder.Entity<AuditLog>());
+        ConfigureUserSession(modelBuilder.Entity<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.ConversationSessionEntity>(), isNpgsql);
+        ConfigureSessionMessage(modelBuilder.Entity<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.SessionMessageEntity>(), isNpgsql);
+        ConfigureOrchestrationRunTrace(modelBuilder.Entity<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.OrchestrationRunTraceEntity>(), isNpgsql);
     }
 
     private static void ConfigureTenant(EntityTypeBuilder<Tenant> entity)
@@ -169,6 +175,120 @@ public sealed class GovernmentDomainCopilotDbContext(
             .HasForeignKey(item => item.TenantId)
             .OnDelete(DeleteBehavior.Restrict);
     }
+
+    private static void ConfigureUserSession(EntityTypeBuilder<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.ConversationSessionEntity> entity, bool isNpgsql)
+    {
+        entity.ToTable("UserSessions");
+        entity.HasKey(item => item.SessionId);
+        entity.Property(item => item.SessionId).HasMaxLength(100).IsRequired();
+        entity.Property(item => item.TenantId).IsRequired();
+        entity.Property(item => item.Title).HasMaxLength(500).IsRequired();
+        entity.Property(item => item.Status).HasMaxLength(50).IsRequired();
+
+        if (!isNpgsql)
+        {
+            entity.Property(item => item.CreatedAt)
+                .HasConversion(v => v.UtcDateTime, v => new DateTimeOffset(v, TimeSpan.Zero))
+                .IsRequired();
+            entity.Property(item => item.LastActivityAt)
+                .HasConversion(v => v.UtcDateTime, v => new DateTimeOffset(v, TimeSpan.Zero))
+                .IsRequired();
+        }
+        else
+        {
+            entity.Property(item => item.CreatedAt).IsRequired();
+            entity.Property(item => item.LastActivityAt).IsRequired();
+        }
+
+        entity.HasIndex(item => new { item.TenantId, item.SessionId }).IsUnique();
+        entity.HasIndex(item => new { item.TenantId, item.LastActivityAt });
+
+        entity.HasOne<Tenant>()
+            .WithMany()
+            .HasForeignKey(item => item.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private static void ConfigureSessionMessage(EntityTypeBuilder<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.SessionMessageEntity> entity, bool isNpgsql)
+    {
+        entity.ToTable("SessionMessages");
+        entity.HasKey(item => item.MessageId);
+        entity.Property(item => item.MessageId).HasMaxLength(100).IsRequired();
+        entity.Property(item => item.SessionId).HasMaxLength(100).IsRequired();
+        entity.Property(item => item.TenantId).IsRequired();
+        entity.Property(item => item.Role).HasMaxLength(50).IsRequired();
+        entity.Property(item => item.Content).IsRequired();
+        entity.Property(item => item.Status).HasMaxLength(100).IsRequired();
+        entity.Property(item => item.LinkedRunId).HasMaxLength(100).IsRequired(false);
+        entity.Property(item => item.CitationsJson).IsRequired(false);
+
+        if (!isNpgsql)
+        {
+            entity.Property(item => item.Timestamp)
+                .HasConversion(v => v.UtcDateTime, v => new DateTimeOffset(v, TimeSpan.Zero))
+                .IsRequired();
+        }
+        else
+        {
+            entity.Property(item => item.Timestamp).IsRequired();
+        }
+
+        entity.HasIndex(item => new { item.TenantId, item.SessionId });
+        entity.HasIndex(item => new { item.SessionId, item.Timestamp });
+
+        entity.HasOne(item => item.Session)
+            .WithMany(s => s.Messages)
+            .HasForeignKey(item => item.SessionId)
+            .HasPrincipalKey(s => s.SessionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        entity.HasOne<Tenant>()
+            .WithMany()
+            .HasForeignKey(item => item.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+
+    private static void ConfigureOrchestrationRunTrace(EntityTypeBuilder<GovernmentDomainCopilot.Infrastructure.Persistence.Entities.OrchestrationRunTraceEntity> entity, bool isNpgsql)
+    {
+        entity.ToTable("OrchestrationRunTraces");
+        entity.HasKey(item => item.RunId);
+        entity.Property(item => item.RunId).HasMaxLength(100).IsRequired();
+        entity.Property(item => item.TenantId).IsRequired();
+        entity.Property(item => item.CorrelationId).HasMaxLength(100).IsRequired();
+        entity.Property(item => item.SessionId).HasMaxLength(100).IsRequired(false);
+        entity.Property(item => item.PatternName).HasMaxLength(200).IsRequired();
+        entity.Property(item => item.Status).HasMaxLength(100).IsRequired();
+        entity.Property(item => item.IterationCount).IsRequired();
+        entity.Property(item => item.Duration).IsRequired();
+        entity.Property(item => item.UsedFallback).IsRequired();
+        entity.Property(item => item.FallbackReason).HasMaxLength(2000).IsRequired(false);
+        entity.Property(item => item.FinalResponseJson).IsRequired(false);
+        entity.Property(item => item.AgentExecutionsJson).IsRequired(false);
+        entity.Property(item => item.PendingApprovalJson).IsRequired(false);
+        entity.Property(item => item.FailureReason).HasMaxLength(2000).IsRequired(false);
+
+        if (!isNpgsql)
+        {
+            entity.Property(item => item.StartedAt)
+                .HasConversion(v => v.UtcDateTime, v => new DateTimeOffset(v, TimeSpan.Zero))
+                .IsRequired();
+            entity.Property(item => item.CompletedAt)
+                .HasConversion(v => v.UtcDateTime, v => new DateTimeOffset(v, TimeSpan.Zero))
+                .IsRequired();
+        }
+        else
+        {
+            entity.Property(item => item.StartedAt).IsRequired();
+            entity.Property(item => item.CompletedAt).IsRequired();
+        }
+
+        entity.HasIndex(item => new { item.TenantId, item.RunId }).IsUnique();
+        entity.HasIndex(item => new { item.TenantId, item.StartedAt });
+        entity.HasIndex(item => new { item.TenantId, item.SessionId });
+
+        entity.HasOne<Tenant>()
+            .WithMany()
+            .HasForeignKey(item => item.TenantId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
 }
-
-

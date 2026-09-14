@@ -83,4 +83,16 @@ public sealed class InMemoryApprovalManager : IApprovalManager
             Message: request.ExecutionSummary ?? "Action safely executed and staged without real-world side effects.",
             ExecutedAt: request.ExecutedAt));
     }
+
+    public Task<IReadOnlyList<ApprovalRequest>> ListRequestsAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        var list = _requests.Values
+            .Where(r => r.TenantId == tenantId)
+            .OrderByDescending(r => r.CreatedAt)
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<ApprovalRequest>>(list);
+    }
 }

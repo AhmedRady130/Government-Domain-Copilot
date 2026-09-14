@@ -4,7 +4,8 @@ using GovernmentDomainCopilot.Application.Agents.Models;
 
 public sealed record OrchestrationApiRequest(
     string Query,
-    string? CorrelationId = null);
+    string? CorrelationId = null,
+    string? SessionId = null);
 
 public sealed record AgentExecutionDto(
     string AgentRole,
@@ -42,7 +43,8 @@ public sealed record OrchestrationApiResponse(
     IReadOnlyList<CitationItemApiResponse> Citations,
     IReadOnlyList<AgentExecutionDto> AgentExecutions,
     PendingApprovalDto? PendingApproval,
-    string? FailureReason);
+    string? FailureReason,
+    string? SessionId = null);
 
 public sealed record ApprovalDecisionApiRequest(
     string Decision,

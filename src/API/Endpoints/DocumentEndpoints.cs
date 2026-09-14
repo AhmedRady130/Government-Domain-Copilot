@@ -87,11 +87,54 @@ public static class DocumentEndpoints
             }
         })
         .WithName("IngestDocument")
+        .WithTags("Documents")
+        .WithSummary("Ingest a document")
         .Produces<IngestDocumentApiResponse>(StatusCodes.Status201Created)
         .Produces<IngestDocumentApiResponse>(StatusCodes.Status422UnprocessableEntity)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status500InternalServerError);
+
+        // GET /api/documents/{documentId}
+        endpoints.MapGet("/api/documents/{documentId:guid}", async (
+            Guid documentId,
+            IDocumentRepository repository,
+            GovernmentDomainCopilot.Application.Abstractions.ITenantContext tenantContext,
+            ILoggerFactory loggerFactory,
+            CancellationToken cancellationToken) =>
+        {
+            var logger = loggerFactory.CreateLogger("DocumentEndpoints");
+            var tenantId = tenantContext.GetTenantId();
+
+            var doc = await repository.GetByIdAsync(tenantId, documentId, cancellationToken);
+            if (doc == null)
+            {
+                return Results.NotFound(new
+                {
+                    error = "Not found",
+                    details = $"Document '{documentId}' was not found for the authenticated tenant."
+                });
+            }
+
+            var chunks = await repository.GetChunksByDocumentIdAsync(tenantId, documentId, cancellationToken);
+
+            var response = new DocumentDetailApiResponse(
+                doc.Id,
+                doc.Title,
+                doc.SourceReference,
+                doc.IngestionStatus.ToString(),
+                chunks.Count,
+                doc.FailureReason,
+                doc.CreatedAtUtc);
+
+            return Results.Ok(response);
+        })
+        .WithName("GetDocument")
+        .WithTags("Documents")
+        .WithSummary("Get document details and ingestion status by ID")
+        .WithDescription("Retrieves document metadata, ingestion status, and chunk count for the authenticated tenant.")
+        .Produces<DocumentDetailApiResponse>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status404NotFound);
 
         return endpoints;
     }

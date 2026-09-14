@@ -27,4 +27,8 @@ public interface IApprovalManager
         string requestId,
         Guid tenantId,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ApprovalRequest>> ListRequestsAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<ApprovalRequest>>(Array.Empty<ApprovalRequest>());
 }

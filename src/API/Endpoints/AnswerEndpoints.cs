@@ -16,6 +16,8 @@ public static class AnswerEndpoints
         endpoints.MapPost("/api/answer", async (
             GroundedAnswerApiRequest? request,
             IGroundedAnswerUseCase useCase,
+            GovernmentDomainCopilot.Application.Sessions.Abstractions.ISessionStore sessionStore,
+            GovernmentDomainCopilot.Application.Abstractions.ITenantContext tenantContext,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
@@ -28,6 +30,21 @@ public static class AnswerEndpoints
                     error = "Validation failed",
                     details = "Query is required in request body and cannot be empty."
                 });
+            }
+
+            var tenantId = tenantContext.GetTenantId();
+
+            if (!string.IsNullOrWhiteSpace(request.SessionId))
+            {
+                var session = await sessionStore.GetSessionAsync(request.SessionId, tenantId, cancellationToken);
+                if (session == null)
+                {
+                    return Results.NotFound(new
+                    {
+                        error = "Not found",
+                        details = $"Session '{request.SessionId}' was not found for the authenticated tenant."
+                    });
+                }
             }
 
             try
@@ -43,6 +60,37 @@ public static class AnswerEndpoints
                     c.Title,
                     c.Sequence)).ToList();
 
+                if (!string.IsNullOrWhiteSpace(request.SessionId))
+                {
+                    try
+                    {
+                        await sessionStore.AppendMessageAsync(
+                            request.SessionId,
+                            tenantId,
+                            "user",
+                            request.Query,
+                            "UserQuery",
+                            null,
+                            null,
+                            cancellationToken);
+
+                        var answerText = result.Answer ?? result.Reason ?? "No response generated.";
+                        await sessionStore.AppendMessageAsync(
+                            request.SessionId,
+                            tenantId,
+                            "assistant",
+                            answerText,
+                            result.Status.ToString(),
+                            result.Citations,
+                            null,
+                            cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex, "Failed to record session message for SessionId={SessionId}.", request.SessionId);
+                    }
+                }
+
                 var response = new GroundedAnswerApiResponse(
                     result.Status.ToString(),
                     result.Answer,
@@ -50,7 +98,8 @@ public static class AnswerEndpoints
                     citations,
                     result.ProviderName,
                     result.ModelName,
-                    result.Duration.TotalMilliseconds);
+                    result.Duration.TotalMilliseconds,
+                    request.SessionId);
 
                 return Results.Ok(response);
             }
@@ -84,9 +133,13 @@ public static class AnswerEndpoints
             }
         })
         .WithName("GroundedAnswer")
+        .WithTags("Answer")
+        .WithSummary("Generate grounded government domain answer")
+        .WithDescription("Produces an evidence-grounded answer with citations or typed refusal for the user query.")
         .Produces<GroundedAnswerApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status403Forbidden)
+        .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status500InternalServerError);
 
         return endpoints;

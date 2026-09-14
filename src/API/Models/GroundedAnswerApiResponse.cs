@@ -2,7 +2,8 @@ namespace GovernmentDomainCopilot.API.Models;
 
 public sealed record GroundedAnswerApiRequest(
     string Query,
-    int? TopK = null);
+    int? TopK = null,
+    string? SessionId = null);
 
 public sealed record CitationItemApiResponse(
     string CitationId,
@@ -19,4 +20,5 @@ public sealed record GroundedAnswerApiResponse(
     IReadOnlyList<CitationItemApiResponse> Citations,
     string ProviderName,
     string ModelName,
-    double DurationMs);
+    double DurationMs,
+    string? SessionId = null);
