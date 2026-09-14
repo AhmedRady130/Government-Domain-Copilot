@@ -11,6 +11,36 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
+// Return clean, safe error responses without leaking internal stack traces or server implementation details
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var exceptionHandlerPathFeature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerPathFeature>();
+        var ex = exceptionHandlerPathFeature?.Error;
+
+        if (ex is BadHttpRequestException)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsJsonAsync(new
+            {
+                error = "Invalid request",
+                details = "The request payload was invalid or could not be deserialized."
+            });
+            return;
+        }
+
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsJsonAsync(new
+        {
+            error = "Internal server error",
+            details = "An unexpected error occurred processing your request."
+        });
+    });
+});
+
 // Correlation ID must be set before authentication so all downstream middleware
 // (including the auth handler) can read the correlation context.
 app.UseMiddleware<CorrelationIdMiddleware>();
