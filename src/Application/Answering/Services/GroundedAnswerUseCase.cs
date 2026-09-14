@@ -20,6 +20,9 @@ public sealed class GroundedAnswerUseCase : IGroundedAnswerUseCase
     private readonly IEvidenceSufficiencyPolicy _sufficiencyPolicy;
     private readonly ICitationValidator _citationValidator;
     private readonly ILogger<GroundedAnswerUseCase> _logger;
+    private readonly ICorrelationContext? _correlationContext;
+    private readonly GovernmentDomainCopilot.Application.Observability.Abstractions.ILlmTraceStore? _llmTraceStore;
+    private readonly GovernmentDomainCopilot.Application.Observability.Abstractions.ICostCalculator? _costCalculator;
 
     public GroundedAnswerUseCase(
         ITenantContext tenantContext,
@@ -27,7 +30,10 @@ public sealed class GroundedAnswerUseCase : IGroundedAnswerUseCase
         IChatCompletionProvider completionProvider,
         IEvidenceSufficiencyPolicy sufficiencyPolicy,
         ICitationValidator citationValidator,
-        ILogger<GroundedAnswerUseCase> logger)
+        ILogger<GroundedAnswerUseCase> logger,
+        ICorrelationContext? correlationContext = null,
+        GovernmentDomainCopilot.Application.Observability.Abstractions.ILlmTraceStore? llmTraceStore = null,
+        GovernmentDomainCopilot.Application.Observability.Abstractions.ICostCalculator? costCalculator = null)
     {
         _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
         _hybridSearchUseCase = hybridSearchUseCase ?? throw new ArgumentNullException(nameof(hybridSearchUseCase));
@@ -35,6 +41,9 @@ public sealed class GroundedAnswerUseCase : IGroundedAnswerUseCase
         _sufficiencyPolicy = sufficiencyPolicy ?? throw new ArgumentNullException(nameof(sufficiencyPolicy));
         _citationValidator = citationValidator ?? throw new ArgumentNullException(nameof(citationValidator));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _correlationContext = correlationContext;
+        _llmTraceStore = llmTraceStore;
+        _costCalculator = costCalculator;
     }
 
     public Task<GroundedAnswerResponse> GetGroundedAnswerAsync(
@@ -94,12 +103,26 @@ public sealed class GroundedAnswerUseCase : IGroundedAnswerUseCase
 
         string userPrompt = $"USER QUESTION:\n{request.Query}\n\n{evidenceContext}";
 
+        var correlationId = request.CorrelationId
+            ?? _correlationContext?.CorrelationId
+            ?? $"corr-{Guid.NewGuid():N}";
+        var runId = request.RunId;
+        var operationType = eventSink != null ? "StreamChatCompletion" : "ChatCompletion";
+
+        GovernmentDomainCopilot.Application.Answering.Models.ChatCompletionUsageMetadata? capturedUsage = null;
         var completionRequest = new ChatCompletionRequest(
             SystemPrompt: GroundedAnswerPrompts.SystemPromptV1,
-            UserPrompt: userPrompt);
+            UserPrompt: userPrompt,
+            CorrelationId: correlationId,
+            RunId: runId,
+            OperationType: operationType,
+            OnUsageResolved: usage => capturedUsage = usage);
 
-        // Step 4: Invoke completion provider
+        // Step 4: Invoke completion provider with safe LLM invocation tracing
         ChatCompletionResult completionResult;
+        var llmStopwatch = Stopwatch.StartNew();
+        var llmStartedAt = DateTimeOffset.UtcNow;
+
         try
         {
             if (eventSink != null)
@@ -111,21 +134,117 @@ public sealed class GroundedAnswerUseCase : IGroundedAnswerUseCase
                     eventSink.EmitChunk(chunk);
                 }
 
+                llmStopwatch.Stop();
+                var llmCompletedAt = DateTimeOffset.UtcNow;
+
                 completionResult = new ChatCompletionResult(
                     contentBuilder.ToString(),
                     _completionProvider.ProviderName,
                     completionRequest.Model ?? "default",
-                    stopwatch.Elapsed);
+                    llmStopwatch.Elapsed,
+                    capturedUsage);
+
+                if (_llmTraceStore != null)
+                {
+                    decimal? cost = _costCalculator?.CalculateEstimatedCost(
+                        completionResult.ModelName,
+                        capturedUsage?.PromptTokens,
+                        capturedUsage?.CompletionTokens);
+
+                    var trace = new GovernmentDomainCopilot.Application.Observability.Models.LlmInvocationTrace(
+                        Id: Guid.NewGuid(),
+                        TenantId: tenantId,
+                        CorrelationId: correlationId,
+                        RunId: runId,
+                        ProviderName: completionResult.ProviderName,
+                        ModelName: completionResult.ModelName,
+                        OperationType: operationType,
+                        StartedAt: llmStartedAt,
+                        CompletedAt: llmCompletedAt,
+                        Duration: llmStopwatch.Elapsed,
+                        IsSuccess: true,
+                        PromptTokens: capturedUsage?.PromptTokens,
+                        CompletionTokens: capturedUsage?.CompletionTokens,
+                        TotalTokens: capturedUsage?.TotalTokens,
+                        EstimatedCost: cost,
+                        ErrorMessage: null);
+
+                    await _llmTraceStore.RecordTraceAsync(trace, cancellationToken);
+                }
             }
             else
             {
                 completionResult = await _completionProvider.CompleteAsync(completionRequest, cancellationToken);
+                llmStopwatch.Stop();
+                var llmCompletedAt = DateTimeOffset.UtcNow;
+
+                if (_llmTraceStore != null)
+                {
+                    var usage = completionResult.Usage ?? capturedUsage;
+                    decimal? cost = _costCalculator?.CalculateEstimatedCost(
+                        completionResult.ModelName,
+                        usage?.PromptTokens,
+                        usage?.CompletionTokens);
+
+                    var trace = new GovernmentDomainCopilot.Application.Observability.Models.LlmInvocationTrace(
+                        Id: Guid.NewGuid(),
+                        TenantId: tenantId,
+                        CorrelationId: correlationId,
+                        RunId: runId,
+                        ProviderName: completionResult.ProviderName,
+                        ModelName: completionResult.ModelName,
+                        OperationType: operationType,
+                        StartedAt: llmStartedAt,
+                        CompletedAt: llmCompletedAt,
+                        Duration: llmStopwatch.Elapsed,
+                        IsSuccess: true,
+                        PromptTokens: usage?.PromptTokens,
+                        CompletionTokens: usage?.CompletionTokens,
+                        TotalTokens: usage?.TotalTokens,
+                        EstimatedCost: cost,
+                        ErrorMessage: null);
+
+                    await _llmTraceStore.RecordTraceAsync(trace, cancellationToken);
+                }
             }
         }
         catch (Exception ex)
         {
-            stopwatch.Stop();
+            llmStopwatch.Stop();
+            var llmCompletedAt = DateTimeOffset.UtcNow;
             _logger.LogError(ex, "Chat completion provider failure for tenant {TenantId}.", tenantId);
+
+            if (_llmTraceStore != null)
+            {
+                var failedTrace = new GovernmentDomainCopilot.Application.Observability.Models.LlmInvocationTrace(
+                    Id: Guid.NewGuid(),
+                    TenantId: tenantId,
+                    CorrelationId: correlationId,
+                    RunId: runId,
+                    ProviderName: _completionProvider.ProviderName,
+                    ModelName: completionRequest.Model ?? "default",
+                    OperationType: operationType,
+                    StartedAt: llmStartedAt,
+                    CompletedAt: llmCompletedAt,
+                    Duration: llmStopwatch.Elapsed,
+                    IsSuccess: false,
+                    PromptTokens: null,
+                    CompletionTokens: null,
+                    TotalTokens: null,
+                    EstimatedCost: null,
+                    ErrorMessage: SanitizeErrorMessage(ex.Message));
+
+                try
+                {
+                    await _llmTraceStore.RecordTraceAsync(failedTrace, CancellationToken.None);
+                }
+                catch (Exception traceEx)
+                {
+                    _logger.LogWarning(traceEx, "Failed to persist error trace for failed LLM call.");
+                }
+            }
+
+            stopwatch.Stop();
             throw;
         }
 
@@ -168,5 +287,15 @@ public sealed class GroundedAnswerUseCase : IGroundedAnswerUseCase
             ProviderName: completionResult.ProviderName,
             ModelName: completionResult.ModelName,
             Duration: stopwatch.Elapsed);
+    }
+
+    private static string SanitizeErrorMessage(string? error)
+    {
+        if (string.IsNullOrWhiteSpace(error)) return "Unknown error";
+        var clean = System.Text.RegularExpressions.Regex.Replace(
+            error,
+            @"(?i)(bearer\s+[a-z0-9_\-\.]+|x-goog-api-key[=:\s]+[a-z0-9_\-]+|api[_-]?key[=:\s]+[a-z0-9_\-]+)",
+            "[REDACTED]");
+        return clean.Length > 2000 ? clean[..2000] : clean;
     }
 }

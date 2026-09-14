@@ -3,10 +3,14 @@ using GovernmentDomainCopilot.Application.Documents;
 using GovernmentDomainCopilot.Application.Documents.Abstractions;
 using GovernmentDomainCopilot.Application.Embeddings.Abstractions;
 using GovernmentDomainCopilot.Application.Embeddings.Models;
+using GovernmentDomainCopilot.Application.Observability.Abstractions;
+using GovernmentDomainCopilot.Application.Observability.Models;
+using GovernmentDomainCopilot.Application.Observability.Services;
 using GovernmentDomainCopilot.Application.Retrieval.Abstractions;
 using GovernmentDomainCopilot.Infrastructure.Documents;
 using GovernmentDomainCopilot.Infrastructure.Embeddings.Providers;
 using GovernmentDomainCopilot.Infrastructure.LLM.Providers;
+using GovernmentDomainCopilot.Infrastructure.Observability;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using GovernmentDomainCopilot.Infrastructure.Retrieval;
 using GovernmentDomainCopilot.Infrastructure.Tenancy;
@@ -99,6 +103,22 @@ public static class DependencyInjection
         // Durable PostgreSQL-backed Session History & Run Trace Stores (FR-7)
         services.AddScoped<GovernmentDomainCopilot.Application.Sessions.Abstractions.ISessionStore, GovernmentDomainCopilot.Infrastructure.Sessions.PostgresSessionStore>();
         services.AddScoped<GovernmentDomainCopilot.Application.Traces.Abstractions.IRunTraceStore, GovernmentDomainCopilot.Infrastructure.Traces.PostgresRunTraceStore>();
+
+        // Observability: Correlation context, cost calculator, LLM trace store (FR-9)
+        // ICorrelationContext is scoped (one per HTTP request / logical scope)
+        services.AddScoped<CorrelationContext>();
+        services.AddScoped<ICorrelationContext>(sp => sp.GetRequiredService<CorrelationContext>());
+
+        // ModelPricingOptions from configuration (section "ModelPricing")
+        services.Configure<ModelPricingOptions>(
+            configuration.GetSection(ModelPricingOptions.SectionName));
+
+        // ICostCalculator is stateless; singleton is safe
+        services.AddSingleton<ICostCalculator, ModelPricingCostCalculator>();
+
+        // ILlmTraceStore → PostgresLlmTraceStore for ALL runtime environments (Development + Production).
+        // InMemoryLlmTraceStore must NEVER be registered here; it is test-only and injected via test DI overrides.
+        services.AddScoped<ILlmTraceStore, PostgresLlmTraceStore>();
 
         return services;
     }
