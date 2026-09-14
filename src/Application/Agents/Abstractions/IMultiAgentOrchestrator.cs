@@ -1,8 +1,9 @@
 namespace GovernmentDomainCopilot.Application.Agents.Abstractions;
 
 using GovernmentDomainCopilot.Application.Agents.Models;
+using GovernmentDomainCopilot.Application.Streaming.Abstractions;
 
-public interface IMultiAgentOrchestrator
+public interface IMultiAgentOrchestrator : IStreamingOrchestrator
 {
     string PatternName { get; }
 

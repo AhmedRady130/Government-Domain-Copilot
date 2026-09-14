@@ -19,4 +19,18 @@ public interface IChatCompletionProvider
     Task<ChatCompletionResult> CompleteAsync(
         ChatCompletionRequest request,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Streams genuine incremental text chunks from the LLM provider.
+    /// </summary>
+    async IAsyncEnumerable<string> StreamCompleteAsync(
+        ChatCompletionRequest request,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var result = await CompleteAsync(request, cancellationToken);
+        if (!string.IsNullOrEmpty(result.Content))
+        {
+            yield return result.Content;
+        }
+    }
 }

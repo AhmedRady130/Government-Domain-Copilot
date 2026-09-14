@@ -148,6 +148,126 @@ public sealed class GeminiChatCompletionProvider : IChatCompletionProvider
         }
     }
 
+    public async IAsyncEnumerable<string> StreamCompleteAsync(
+        ChatCompletionRequest request,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.IsNullOrWhiteSpace(request.UserPrompt))
+        {
+            throw new ArgumentException("User prompt cannot be null or whitespace.", nameof(request));
+        }
+
+        var modelName = request.Model ?? _options.PrimaryModel;
+        var formattedModel = modelName.StartsWith("models/", StringComparison.OrdinalIgnoreCase)
+            ? modelName
+            : $"models/{modelName}";
+
+        var apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+        var baseUrl = _options.GeminiBaseUrl.TrimEnd('/');
+        var requestUri = $"{baseUrl}/v1beta/{formattedModel}:streamGenerateContent?alt=sse";
+
+        GeminiSystemInstruction? systemInstruction = null;
+        if (!string.IsNullOrWhiteSpace(request.SystemPrompt))
+        {
+            systemInstruction = new GeminiSystemInstruction(new[] { new GeminiPartItem(request.SystemPrompt) });
+        }
+
+        var contents = new List<GeminiContentItem>
+        {
+            new GeminiContentItem("user", new[] { new GeminiPartItem(request.UserPrompt) })
+        };
+
+        var temperature = request.Temperature ?? _options.DefaultTemperature;
+        var maxTokens = request.MaxTokens ?? _options.DefaultMaxOutputTokens;
+        var generationConfig = new GeminiGenerationConfig(temperature, maxTokens);
+
+        var payload = new GeminiGenerateContentRequest(
+            contents,
+            systemInstruction,
+            generationConfig);
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUri);
+        httpRequest.Content = JsonContent.Create(payload);
+
+        // MANDATORY REQUIREMENT: Use x-goog-api-key header. Do NOT put API key in query string.
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            httpRequest.Headers.Add("x-goog-api-key", apiKey);
+        }
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex, "Gemini stream completion HTTP transport error occurred.");
+            throw new LlmProviderUnavailableException(Name, "Network transport error communicating with Gemini API.", ex);
+        }
+
+        using (response)
+        {
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+            {
+                throw new LlmRateLimitException(Name, "Gemini API rate limit exceeded (HTTP 429).");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning("Gemini stream completion request failed with HTTP {StatusCode}.", response.StatusCode);
+
+                throw new LlmProviderUnavailableException(
+                    Name,
+                    $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}. Details: {SanitizeErrorMessage(errorBody)}");
+            }
+
+            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var reader = new System.IO.StreamReader(stream);
+
+            while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(cancellationToken);
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                if (line.StartsWith("data: ", StringComparison.OrdinalIgnoreCase))
+                {
+                    var json = line.Substring(6).Trim();
+                    if (json.Equals("[DONE]", StringComparison.OrdinalIgnoreCase))
+                    {
+                        break;
+                    }
+
+                    GeminiGenerateContentResponse? chunkObj = null;
+                    try
+                    {
+                        chunkObj = System.Text.Json.JsonSerializer.Deserialize<GeminiGenerateContentResponse>(json);
+                    }
+                    catch (System.Text.Json.JsonException)
+                    {
+                        continue;
+                    }
+
+                    var chunkText = chunkObj?.Candidates?.FirstOrDefault()?.Content?.Parts?.FirstOrDefault()?.Text;
+                    if (!string.IsNullOrEmpty(chunkText))
+                    {
+                        yield return chunkText;
+                    }
+                }
+            }
+        }
+    }
+
     private static string SanitizeErrorMessage(string? errorBody)
     {
         if (string.IsNullOrWhiteSpace(errorBody))

@@ -157,8 +157,227 @@ public sealed class GeminiChatCompletionProviderTests
         Assert.Equal("Gemini", ex.ProviderName);
     }
 
+    // -----------------------------------------------------------------------
+    // StreamCompleteAsync tests (H-2)
+    // -----------------------------------------------------------------------
+
+    /// <summary>Drains an <see cref="IAsyncEnumerable{T}"/> into a list (avoids System.Linq.Async dependency).</summary>
+    private static async Task<List<string>> DrainAsync(IAsyncEnumerable<string> source, CancellationToken ct = default)
+    {
+        var list = new List<string>();
+        await foreach (var item in source.WithCancellation(ct))
+            list.Add(item);
+        return list;
+    }
+
+    /// <summary>Builds a valid SSE body with one data line per chunk, terminated by [DONE].</summary>
+    private static string BuildSseBody(IEnumerable<string> textChunks)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var text in textChunks)
+        {
+            var json = JsonSerializer.Serialize(new
+            {
+                candidates = new[]
+                {
+                    new { content = new { parts = new[] { new { text } } } }
+                }
+            });
+            sb.Append("data: ").Append(json).Append("\n\n");
+        }
+        sb.Append("data: [DONE]\n\n");
+        return sb.ToString();
+    }
+
+
+    [Fact]
+    public async Task StreamCompleteAsync_RequestUri_ContainsStreamGenerateContentAndAltSse()
+    {
+        var body = BuildSseBody(new[] { "Hello" });
+        var handler = new StreamingFakeHttpMessageHandler(HttpStatusCode.OK, body);
+        var httpClient = new HttpClient(handler);
+        var provider = new GeminiChatCompletionProvider(httpClient, Options.Create(_options), NullLogger<GeminiChatCompletionProvider>.Instance);
+
+        var request = new ChatCompletionRequest("System", "User");
+        _ = await DrainAsync(provider.StreamCompleteAsync(request, CancellationToken.None));
+
+        Assert.NotNull(handler.LastRequestUri);
+        Assert.Contains(":streamGenerateContent", handler.LastRequestUri!.AbsolutePath, StringComparison.Ordinal);
+        Assert.Contains("alt=sse", handler.LastRequestUri.Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamCompleteAsync_ApiKey_SentAsHeaderNotQueryString()
+    {
+        var prevKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+        try
+        {
+            Environment.SetEnvironmentVariable("GEMINI_API_KEY", "test-gemini-api-key");
+
+            var body = BuildSseBody(new[] { "Hello" });
+            var handler = new StreamingFakeHttpMessageHandler(HttpStatusCode.OK, body);
+            var httpClient = new HttpClient(handler);
+            var provider = new GeminiChatCompletionProvider(httpClient, Options.Create(_options), NullLogger<GeminiChatCompletionProvider>.Instance);
+
+            var request = new ChatCompletionRequest("System", "User");
+            _ = await DrainAsync(provider.StreamCompleteAsync(request, CancellationToken.None));
+
+            // API key must NOT appear in the query string.
+            Assert.DoesNotContain("key=", handler.LastRequestUri?.Query ?? string.Empty, StringComparison.Ordinal);
+
+            // API key header must be present.
+            Assert.NotNull(handler.LastRequestHeaders);
+            Assert.True(handler.LastRequestHeaders!.Contains("x-goog-api-key"),
+                "Expected x-goog-api-key header on the streaming request.");
+            Assert.Equal("test-gemini-api-key", handler.LastRequestHeaders.GetValues("x-goog-api-key").First());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GEMINI_API_KEY", prevKey);
+        }
+    }
+
+    [Fact]
+    public async Task StreamCompleteAsync_MultipleDataLines_YieldsIncrementalChunks()
+    {
+        var expectedChunks = new[] { "Hello", " world", "!" };
+        var body = BuildSseBody(expectedChunks);
+        var handler = new StreamingFakeHttpMessageHandler(HttpStatusCode.OK, body);
+        var httpClient = new HttpClient(handler);
+        var provider = new GeminiChatCompletionProvider(httpClient, Options.Create(_options), NullLogger<GeminiChatCompletionProvider>.Instance);
+
+        var request = new ChatCompletionRequest("System", "User");
+        var chunks = await DrainAsync(provider.StreamCompleteAsync(request, CancellationToken.None));
+
+        // Each SSE data line must produce exactly one yielded chunk — not batched.
+        Assert.Equal(expectedChunks.Length, chunks.Count);
+        Assert.Equal(expectedChunks, chunks);
+    }
+
+    [Fact]
+    public async Task StreamCompleteAsync_DoneTerminator_EndsIterationCleanly()
+    {
+        // Body with two chunks followed by [DONE]; iteration must stop after [DONE].
+        var body = BuildSseBody(new[] { "First", "Second" });
+        var handler = new StreamingFakeHttpMessageHandler(HttpStatusCode.OK, body);
+        var httpClient = new HttpClient(handler);
+        var provider = new GeminiChatCompletionProvider(httpClient, Options.Create(_options), NullLogger<GeminiChatCompletionProvider>.Instance);
+
+        var request = new ChatCompletionRequest("System", "User");
+        var chunks = await DrainAsync(provider.StreamCompleteAsync(request, CancellationToken.None));
+
+        Assert.Equal(2, chunks.Count);
+        Assert.Equal("First", chunks[0]);
+        Assert.Equal("Second", chunks[1]);
+    }
+
+    [Fact]
+    public async Task StreamCompleteAsync_Http429_ThrowsLlmRateLimitException()
+    {
+        var handler = new StreamingFakeHttpMessageHandler(HttpStatusCode.TooManyRequests, "Rate limit exceeded");
+        var httpClient = new HttpClient(handler);
+        var provider = new GeminiChatCompletionProvider(httpClient, Options.Create(_options), NullLogger<GeminiChatCompletionProvider>.Instance);
+
+        var request = new ChatCompletionRequest("System", "User");
+        var ex = await Assert.ThrowsAsync<LlmRateLimitException>(async () =>
+            await DrainAsync(provider.StreamCompleteAsync(request, CancellationToken.None)));
+
+        Assert.Equal("Gemini", ex.ProviderName);
+    }
+
+    [Fact]
+    public async Task StreamCompleteAsync_MalformedAndEmptySseLines_DoNotCrashParser()
+    {
+        // Mix of empty lines, comment lines, malformed JSON, and a valid chunk.
+        var sseBody =
+            "\n" +
+            ": comment line\n" +
+            "data: {not valid json}\n\n" +
+            "data: \n\n" +
+            "data: " + JsonSerializer.Serialize(new
+            {
+                candidates = new[]
+                {
+                    new { content = new { parts = new[] { new { text = "OK" } } } }
+                }
+            }) + "\n\n" +
+            "data: [DONE]\n\n";
+
+        var handler = new StreamingFakeHttpMessageHandler(HttpStatusCode.OK, sseBody);
+        var httpClient = new HttpClient(handler);
+        var provider = new GeminiChatCompletionProvider(httpClient, Options.Create(_options), NullLogger<GeminiChatCompletionProvider>.Instance);
+
+        var request = new ChatCompletionRequest("System", "User");
+        // Must not throw; valid chunk must still be yielded.
+        var chunks = await DrainAsync(provider.StreamCompleteAsync(request, CancellationToken.None));
+
+        Assert.Contains("OK", chunks);
+    }
+
+    [Fact]
+    public async Task StreamCompleteAsync_CancellationToken_PropagatesAndThrowsOperationCancelled()
+    {
+        // Use a TCS-backed handler that blocks until cancellation is signalled.
+        using var cts = new CancellationTokenSource();
+        var tcs = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        cts.Token.Register(() => tcs.TrySetCanceled(cts.Token));
+
+        var handler = new BlockingFakeHttpMessageHandler(tcs.Task);
+        var httpClient = new HttpClient(handler);
+        var provider = new GeminiChatCompletionProvider(httpClient, Options.Create(_options), NullLogger<GeminiChatCompletionProvider>.Instance);
+
+        var request = new ChatCompletionRequest("System", "User");
+
+        // Cancel after a short delay.
+        cts.CancelAfter(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            await DrainAsync(provider.StreamCompleteAsync(request, cts.Token), cts.Token));
+    }
+
+    private sealed class StreamingFakeHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly HttpStatusCode _statusCode;
+        private readonly string _responseBody;
+
+        public Uri? LastRequestUri { get; private set; }
+        public HttpRequestHeaders? LastRequestHeaders { get; private set; }
+
+        public StreamingFakeHttpMessageHandler(HttpStatusCode statusCode, string responseBody)
+        {
+            _statusCode = statusCode;
+            _responseBody = responseBody;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            LastRequestUri = request.RequestUri;
+            LastRequestHeaders = request.Headers;
+
+            var bytes = System.Text.Encoding.UTF8.GetBytes(_responseBody);
+            var stream = new System.IO.MemoryStream(bytes);
+            var content = new StreamContent(stream);
+            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream");
+
+            var response = new HttpResponseMessage(_statusCode) { Content = content };
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class BlockingFakeHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly Task<HttpResponseMessage> _responseTask;
+
+        public BlockingFakeHttpMessageHandler(Task<HttpResponseMessage> responseTask)
+            => _responseTask = responseTask;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => _responseTask;
+    }
+
     private sealed class FakeHttpMessageHandler : HttpMessageHandler
     {
+
         private readonly HttpStatusCode _statusCode;
         private readonly string _responseContent;
 
