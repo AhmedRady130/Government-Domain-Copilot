@@ -1,11 +1,15 @@
 namespace GovernmentDomainCopilot.Application.Agents.Services;
 
 using System.Diagnostics;
+using System.Threading.Channels;
 using GovernmentDomainCopilot.Application.Abstractions;
 using GovernmentDomainCopilot.Application.Agents.Abstractions;
 using GovernmentDomainCopilot.Application.Agents.Models;
 using GovernmentDomainCopilot.Application.Answering.Abstractions;
 using GovernmentDomainCopilot.Application.Answering.Models;
+using GovernmentDomainCopilot.Application.Streaming.Abstractions;
+using GovernmentDomainCopilot.Application.Streaming.Models;
+using GovernmentDomainCopilot.Application.Streaming.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -41,6 +45,210 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
         _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
         _options = options?.Value ?? new OrchestrationOptions();
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    public async IAsyncEnumerable<StreamProgressEvent> OrchestrateStreamAsync(
+        string userQuery,
+        string? correlationId = null,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var tenantId = _tenantContext.GetTenantId();
+        var runId = $"run-{Guid.NewGuid():N}";
+        var resolvedCorrelationId = correlationId ?? $"corr-{Guid.NewGuid():N}";
+
+        var channel = Channel.CreateUnbounded<StreamProgressEvent>(
+            new UnboundedChannelOptions
+            {
+                SingleWriter = true,
+                SingleReader = true
+            });
+
+        var sink = new ChannelBasedEventSink(channel, runId, resolvedCorrelationId, tenantId);
+        var context = new AgentContext(tenantId, runId, resolvedCorrelationId, userQuery, eventSink: sink);
+        var toolsByName = _tools.ToDictionary(t => t.Name, StringComparer.OrdinalIgnoreCase);
+
+        var totalStopwatch = Stopwatch.StartNew();
+
+        _ = Task.Run(async () =>
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, _options.TimeoutSeconds)));
+            var pipelineCt = cts.Token;
+
+            try
+            {
+                sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                    StreamEventType.RunStarted,
+                    "Pipeline", "Started", totalStopwatch.ElapsedMilliseconds));
+
+                var orderedAgents = _agents
+                    .OrderBy(a => Array.IndexOf(PipelineRoles, a.Role) >= 0 ? Array.IndexOf(PipelineRoles, a.Role) : int.MaxValue)
+                    .ToList();
+
+                int iterationCount = 0;
+                foreach (var agent in orderedAgents)
+                {
+                    iterationCount++;
+                    if (iterationCount > _options.MaxIterations)
+                    {
+                        throw new InvalidOperationException($"Maximum iteration limit ({_options.MaxIterations}) exceeded.");
+                    }
+
+                    pipelineCt.ThrowIfCancellationRequested();
+
+                    sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                        StreamEventType.AgentStarted,
+                        agent.Role, "Running", totalStopwatch.ElapsedMilliseconds,
+                        agentRole: agent.Role));
+
+                    var allowedTools = toolsByName
+                        .Where(kvp => agent.AllowedToolNames.Contains(kvp.Key))
+                        .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
+
+                    var agentResult = await ExecuteAgentWithRetryAsync(agent, context, allowedTools, pipelineCt);
+
+                    foreach (var tc in agentResult.ToolCalls)
+                    {
+                        sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                            StreamEventType.ToolStarted,
+                            agent.Role, "Running", totalStopwatch.ElapsedMilliseconds,
+                            agentRole: agent.Role,
+                            toolName: tc.ToolName));
+
+                        sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                            StreamEventType.ToolCompleted,
+                            agent.Role, tc.Success ? "Completed" : "Failed", totalStopwatch.ElapsedMilliseconds,
+                            agentRole: agent.Role,
+                            toolName: tc.ToolName));
+                    }
+
+                    var pendingApprovalAfterAgent = context.GetState<ApprovalRequest>("PendingApprovalRequest");
+                    if (pendingApprovalAfterAgent != null)
+                    {
+                        sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                            StreamEventType.ApprovalRequired,
+                            agent.Role, "ApprovalPending", totalStopwatch.ElapsedMilliseconds,
+                            agentRole: agent.Role,
+                            approvalRequestId: pendingApprovalAfterAgent.RequestId,
+                            approvalAction: pendingApprovalAfterAgent.ProposedAction));
+                    }
+
+                    if (!agentResult.Success)
+                    {
+                        if (_options.EnableFallback && !cancellationToken.IsCancellationRequested)
+                        {
+                            sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                                StreamEventType.FallbackStarted,
+                                "Fallback", "Started", totalStopwatch.ElapsedMilliseconds,
+                                message: "Orchestration failed; initiating Plain-RAG fallback."));
+
+                            var fallbackResponse = await _groundedAnswerUseCase.GetGroundedAnswerAsync(
+                                new GroundedAnswerRequest(userQuery),
+                                sink,
+                                CancellationToken.None);
+
+                            if (fallbackResponse.Status == GroundedAnswerStatus.Grounded)
+                            {
+                                sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                                    StreamEventType.RunCompleted,
+                                    "Pipeline", "CompletedWithFallback", totalStopwatch.ElapsedMilliseconds,
+                                    finalResponse: fallbackResponse));
+                                return;
+                            }
+                            else
+                            {
+                                sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                                    StreamEventType.RunFailed,
+                                    "Pipeline", "Failed", totalStopwatch.ElapsedMilliseconds,
+                                    errorMessage: TruncateErrorMessage(fallbackResponse.Reason ?? "Fallback answer refused.")));
+                                return;
+                            }
+                        }
+
+                        sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                            StreamEventType.RunFailed,
+                            agent.Role, "Failed", totalStopwatch.ElapsedMilliseconds,
+                            agentRole: agent.Role,
+                            errorMessage: TruncateErrorMessage(agentResult.ErrorMessage)));
+                        return;
+                    }
+
+                    if (agentResult.TerminateEarly)
+                    {
+                        sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                            StreamEventType.AgentProgress,
+                            agent.Role, "TerminatedEarly", totalStopwatch.ElapsedMilliseconds,
+                            agentRole: agent.Role,
+                            message: "Agent signaled early termination."));
+                        break;
+                    }
+                }
+
+                var finalResponse = context.GetState<GroundedAnswerResponse>("GroundedAnswerResponse");
+                var pendingApproval = context.GetState<ApprovalRequest>("PendingApprovalRequest");
+
+                // Final-Answer Integrity: RunCompleted may ONLY represent a successfully validated response
+                if (finalResponse != null && finalResponse.Status == GroundedAnswerStatus.Grounded)
+                {
+                    sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                        StreamEventType.RunCompleted,
+                        "Pipeline", "Completed", totalStopwatch.ElapsedMilliseconds,
+                        finalResponse: finalResponse,
+                        approvalRequestId: pendingApproval?.RequestId,
+                        approvalAction: pendingApproval?.ProposedAction));
+                }
+                else
+                {
+                    // Invalid citation or refusal output must NEVER be emitted as RunCompleted
+                    var reason = finalResponse?.Reason ?? "Structural citation validation failed or answer refused.";
+                    sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                        StreamEventType.RunFailed,
+                        "Pipeline", "Refused", totalStopwatch.ElapsedMilliseconds,
+                        finalResponse: finalResponse,
+                        errorMessage: TruncateErrorMessage(reason)));
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Explicit caller cancellation: emit RunCancelled, never fallback, never execute side effects
+                sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                    StreamEventType.RunCancelled,
+                    "Pipeline", "Cancelled", totalStopwatch.ElapsedMilliseconds,
+                    message: "Orchestration was cancelled by caller."));
+            }
+            catch (OperationCanceledException)
+            {
+                // Timeout
+                sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                    StreamEventType.RunFailed,
+                    "Pipeline", "Timeout", totalStopwatch.ElapsedMilliseconds,
+                    errorMessage: $"Orchestration timed out after {_options.TimeoutSeconds} seconds."));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Streaming orchestration failed for RunId={RunId}.", runId);
+                sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
+                    StreamEventType.RunFailed,
+                    "Pipeline", "Failed", totalStopwatch.ElapsedMilliseconds,
+                    errorMessage: TruncateErrorMessage(ex.Message)));
+            }
+            finally
+            {
+                channel.Writer.TryComplete();
+            }
+        }, CancellationToken.None);
+
+        while (await channel.Reader.WaitToReadAsync(CancellationToken.None))
+        {
+            while (channel.Reader.TryRead(out var evt))
+            {
+                yield return evt;
+                if (evt.EventType is StreamEventType.RunCompleted or StreamEventType.RunFailed or StreamEventType.RunCancelled)
+                {
+                    yield break;
+                }
+            }
+        }
     }
 
     public async Task<OrchestrationRunRecord> OrchestrateAsync(
@@ -257,4 +465,43 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
             await Task.Delay(backoffMs * attempts, cancellationToken);
         }
     }
+
+    private static StreamProgressEvent BuildEvent(
+        string runId,
+        string correlationId,
+        Guid tenantId,
+        StreamEventType eventType,
+        string stage,
+        string status,
+        double elapsedMs,
+        string? agentRole = null,
+        string? toolName = null,
+        string? message = null,
+        string? chunk = null,
+        GroundedAnswerResponse? finalResponse = null,
+        string? approvalRequestId = null,
+        string? approvalAction = null,
+        string? errorMessage = null)
+    {
+        return new StreamProgressEvent(
+            RunId: runId,
+            CorrelationId: correlationId,
+            TenantId: tenantId,
+            EventType: eventType,
+            Timestamp: DateTimeOffset.UtcNow,
+            Stage: stage,
+            Status: status,
+            ElapsedMs: elapsedMs,
+            AgentRole: agentRole,
+            ToolName: toolName,
+            Message: message,
+            Chunk: chunk,
+            FinalResponse: finalResponse,
+            ApprovalRequestId: approvalRequestId,
+            ApprovalAction: approvalAction,
+            ErrorMessage: errorMessage);
+    }
+
+    private static string? TruncateErrorMessage(string? msg, int maxLength = 500)
+        => msg is null ? null : (msg.Length <= maxLength ? msg : msg.Substring(0, maxLength) + "...");
 }

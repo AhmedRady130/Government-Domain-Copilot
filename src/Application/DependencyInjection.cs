@@ -44,6 +44,8 @@ public static class DependencyInjection
         services.AddScoped<GovernmentDomainCopilot.Application.Agents.Abstractions.IAgent, GovernmentDomainCopilot.Application.Agents.Implementations.ResponseDrafterAgent>();
 
         services.AddScoped<GovernmentDomainCopilot.Application.Agents.Abstractions.IMultiAgentOrchestrator, GovernmentDomainCopilot.Application.Agents.Services.SequentialPipelineOrchestrator>();
+        services.AddScoped<GovernmentDomainCopilot.Application.Streaming.Abstractions.IStreamingOrchestrator>(sp =>
+            sp.GetRequiredService<GovernmentDomainCopilot.Application.Agents.Abstractions.IMultiAgentOrchestrator>());
 
         return services;
     }

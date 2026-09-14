@@ -46,7 +46,10 @@ public sealed class ResponseDrafterAgent : IAgent
 
         // Grounded answer pipeline execution (preserves all grounding, refusal, and citation invariants)
         var groundedRequest = new GroundedAnswerRequest(context.UserQuery);
-        var groundedResponse = await _groundedAnswerUseCase.GetGroundedAnswerAsync(groundedRequest, cancellationToken);
+        var groundedResponse = await _groundedAnswerUseCase.GetGroundedAnswerAsync(
+            groundedRequest,
+            context.EventSink,
+            cancellationToken);
 
         context.SetState("GroundedAnswerResponse", groundedResponse);
 

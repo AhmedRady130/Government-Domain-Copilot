@@ -9,6 +9,7 @@ using GovernmentDomainCopilot.Application.Retrieval;
 using GovernmentDomainCopilot.Application.Retrieval.Abstractions;
 using GovernmentDomainCopilot.Application.Retrieval.Exceptions;
 using GovernmentDomainCopilot.Application.Retrieval.Models;
+using GovernmentDomainCopilot.Application.Streaming.Abstractions;
 using Microsoft.Extensions.Logging;
 
 public sealed class GroundedAnswerUseCase : IGroundedAnswerUseCase
@@ -36,8 +37,16 @@ public sealed class GroundedAnswerUseCase : IGroundedAnswerUseCase
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    public Task<GroundedAnswerResponse> GetGroundedAnswerAsync(
+        GroundedAnswerRequest request,
+        CancellationToken cancellationToken)
+    {
+        return GetGroundedAnswerAsync(request, eventSink: null, cancellationToken);
+    }
+
     public async Task<GroundedAnswerResponse> GetGroundedAnswerAsync(
         GroundedAnswerRequest request,
+        IOrchestrationEventSink? eventSink,
         CancellationToken cancellationToken)
     {
         if (request == null)
@@ -93,7 +102,25 @@ public sealed class GroundedAnswerUseCase : IGroundedAnswerUseCase
         ChatCompletionResult completionResult;
         try
         {
-            completionResult = await _completionProvider.CompleteAsync(completionRequest, cancellationToken);
+            if (eventSink != null)
+            {
+                var contentBuilder = new System.Text.StringBuilder();
+                await foreach (var chunk in _completionProvider.StreamCompleteAsync(completionRequest, cancellationToken))
+                {
+                    contentBuilder.Append(chunk);
+                    eventSink.EmitChunk(chunk);
+                }
+
+                completionResult = new ChatCompletionResult(
+                    contentBuilder.ToString(),
+                    _completionProvider.ProviderName,
+                    completionRequest.Model ?? "default",
+                    stopwatch.Elapsed);
+            }
+            else
+            {
+                completionResult = await _completionProvider.CompleteAsync(completionRequest, cancellationToken);
+            }
         }
         catch (Exception ex)
         {

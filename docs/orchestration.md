@@ -142,3 +142,28 @@ Each orchestration run produces an `OrchestrationRunRecord` containing:
 - `FailureReason`: Error message if pipeline failed.
 
 **Privacy & Security Invariant**: Secrets, API keys, authorization headers, and raw full document bodies are never included in run records or log output.
+
+---
+
+## 7. Streaming Progress Events and Cancellation
+
+### Endpoint
+`POST /api/orchestrate/stream` delivers Server-Sent Events (`text/event-stream; charset=utf-8`) with keep-alive and zero buffering (`X-Accel-Buffering: no`).
+
+### Event Lifecycle and Ordering
+1. **`RunStarted`**: Emitted once orchestration begins, containing `RunId`, `CorrelationId`, and server-authenticated `TenantId`.
+2. **`AgentStarted`**: Emitted when each specialized agent in the pipeline initiates analysis.
+3. **`ToolStarted` / `ToolCompleted`**: Emitted during tool execution (`DocumentSearchTool`, `EligibilityLookupTool`, `ProcedureLookupTool`, `DraftApprovalTool`).
+4. **`AnswerChunk`**: Emitted incrementally as partial token deltas arrive from the upstream LLM provider (`GeminiChatCompletionProvider.StreamCompleteAsync`).
+5. **`ApprovalRequired`**: Emitted when `DraftApprovalTool` queues a pending approval request for human supervisor review.
+6. **`FallbackStarted`**: Emitted if orchestration fails and Plain-RAG fallback is triggered.
+7. **Terminal Events (Guaranteed Exactly One)**:
+   - **`RunCompleted`**: Emitted ONLY when the full answer passes structural citation validation and grounding policies.
+   - **`RunFailed`**: Emitted when unrecoverable failure occurs, or when citation validation fails/refusal is triggered.
+   - **`RunCancelled`**: Emitted when the caller cancels the operation.
+
+### Cancellation Invariants
+- **Responsive Cancellation**: `CancellationToken` propagates through every asynchronous step.
+- **No Fallback on Cancellation**: Explicit caller cancellation immediately terminates execution and **never** triggers Plain-RAG fallback.
+- **No Side-Effect Execution**: Consequential actions and tool executions are aborted; any staged approval requests remain in `Pending` status.
+- **Strict Multi-Tenancy**: The streaming endpoint resolves tenant identity strictly via `ITenantContext`. Any client-supplied tenant overrides (e.g. `X-Tenant-ID` header) are strictly ignored.

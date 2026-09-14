@@ -4,6 +4,8 @@ using GovernmentDomainCopilot.API.Models;
 using GovernmentDomainCopilot.Application.Abstractions;
 using GovernmentDomainCopilot.Application.Agents.Abstractions;
 using GovernmentDomainCopilot.Application.Agents.Models;
+using GovernmentDomainCopilot.Application.Streaming.Abstractions;
+using GovernmentDomainCopilot.Application.Streaming.Models;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -259,6 +261,74 @@ public static class OrchestrationEndpoints
         .Produces<ApprovalExecutionApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status404NotFound);
+
+        // 5. Streaming Orchestration (Server-Sent Events)
+        endpoints.MapPost("/api/orchestrate/stream", async (
+            OrchestrationApiRequest? request,
+            IStreamingOrchestrator streamingOrchestrator,
+            HttpResponse httpResponse,
+            ILoggerFactory loggerFactory,
+            CancellationToken cancellationToken) =>
+        {
+            if (request == null || string.IsNullOrWhiteSpace(request.Query))
+            {
+                httpResponse.StatusCode = StatusCodes.Status400BadRequest;
+                await httpResponse.WriteAsJsonAsync(new
+                {
+                    error = "Validation failed",
+                    details = "Query is required in request body and cannot be empty."
+                }, cancellationToken);
+                return;
+            }
+
+            httpResponse.Headers["Content-Type"] = "text/event-stream; charset=utf-8";
+            httpResponse.Headers["Cache-Control"] = "no-cache";
+            httpResponse.Headers["X-Accel-Buffering"] = "no";
+            httpResponse.Headers["Connection"] = "keep-alive";
+
+            var logger = loggerFactory.CreateLogger("OrchestrationStreamEndpoint");
+            var sseOptions = new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                WriteIndented = false
+            };
+
+            try
+            {
+                await foreach (var evt in streamingOrchestrator.OrchestrateStreamAsync(
+                    request.Query, request.CorrelationId, cancellationToken))
+                {
+                    var eventType = evt.EventType.ToString();
+                    var data = System.Text.Json.JsonSerializer.Serialize(evt, sseOptions);
+                    await httpResponse.WriteAsync($"event: {eventType}\ndata: {data}\n\n", cancellationToken);
+                    await httpResponse.Body.FlushAsync(cancellationToken);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                logger.LogInformation("SSE client disconnected for streaming orchestration.");
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Unexpected error during streaming orchestration SSE.");
+                try
+                {
+                    var errData = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        error = "Internal server error occurred during streaming."
+                    }, sseOptions);
+                    await httpResponse.WriteAsync($"event: Error\ndata: {errData}\n\n", CancellationToken.None);
+                    await httpResponse.Body.FlushAsync(CancellationToken.None);
+                }
+                catch
+                {
+                    // Response stream may already be terminated
+                }
+            }
+        })
+        .WithName("StreamingOrchestrate")
+        .Produces(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status400BadRequest);
 
         return endpoints;
     }
