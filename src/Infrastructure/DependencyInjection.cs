@@ -13,6 +13,7 @@ using GovernmentDomainCopilot.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace GovernmentDomainCopilot.Infrastructure;
 
@@ -42,7 +43,35 @@ public static class DependencyInjection
             configuration.GetSection(GovernmentDomainCopilot.Application.Agents.Models.OrchestrationOptions.SectionName));
 
         services.AddHttpContextAccessor();
-        services.AddScoped<ITenantContext, DevelopmentTenantContext>();
+        services.AddScoped<GovernmentDomainCopilot.Infrastructure.Auth.CurrentUserContext>();
+        services.AddScoped<ICurrentUserContext>(sp => sp.GetRequiredService<GovernmentDomainCopilot.Infrastructure.Auth.CurrentUserContext>());
+        services.AddScoped<DevelopmentTenantContext>();
+
+        services.AddScoped<ITenantContext>(sp =>
+        {
+            var hostEnv = sp.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>();
+            if (hostEnv != null && !hostEnv.IsDevelopment())
+            {
+                // In Production: strictly resolve from authenticated CurrentUserContext
+                return sp.GetRequiredService<GovernmentDomainCopilot.Infrastructure.Auth.CurrentUserContext>();
+            }
+
+            // In Development / Test: use DevelopmentTenantContext (prefers authenticated claims, safe dev fallback)
+            return sp.GetRequiredService<DevelopmentTenantContext>();
+        });
+
+        // Authentication & Authorization (FR-8)
+        services.AddAuthentication(GovernmentDomainCopilot.Infrastructure.Auth.ApiKeyAuthenticationOptions.SchemeName)
+            .AddScheme<GovernmentDomainCopilot.Infrastructure.Auth.ApiKeyAuthenticationOptions, GovernmentDomainCopilot.Infrastructure.Auth.ApiKeyAuthenticationHandler>(
+                GovernmentDomainCopilot.Infrastructure.Auth.ApiKeyAuthenticationOptions.SchemeName, _ => { });
+
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy("SupervisorOnly", policy => policy.RequireRole(GovernmentDomainCopilot.Domain.Constants.Roles.Supervisor));
+            options.AddPolicy("OfficerOrSupervisor", policy => policy.RequireRole(
+                GovernmentDomainCopilot.Domain.Constants.Roles.Officer,
+                GovernmentDomainCopilot.Domain.Constants.Roles.Supervisor));
+        });
 
         services.AddSingleton<IDocumentChunker, DeterministicDocumentChunker>();
         services.AddScoped<DocumentRepository>();

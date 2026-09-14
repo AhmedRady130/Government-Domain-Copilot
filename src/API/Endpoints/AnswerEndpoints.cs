@@ -136,8 +136,10 @@ public static class AnswerEndpoints
         .WithTags("Answer")
         .WithSummary("Generate grounded government domain answer")
         .WithDescription("Produces an evidence-grounded answer with citations or typed refusal for the user query.")
+        .RequireAuthorization()
         .Produces<GroundedAnswerApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status500InternalServerError);

@@ -5,6 +5,7 @@ using GovernmentDomainCopilot.Application.Embeddings.Abstractions;
 using GovernmentDomainCopilot.Application.Embeddings.Models;
 using GovernmentDomainCopilot.Application.Retrieval.Abstractions;
 using GovernmentDomainCopilot.Application.Retrieval.Models;
+using GovernmentDomainCopilot.Infrastructure.Auth;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -66,10 +67,17 @@ public sealed class SearchEndpointContractTests : IClassFixture<WebApplicationFa
         });
     }
 
+    private HttpClient CreateOfficerClient()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(ApiKeyAuthenticationOptions.HeaderName, SeedAuthIdentities.TenantAOfficer.ApiKey);
+        return client;
+    }
+
     [Fact]
     public async Task Search_empty_query_returns_400_BadRequest()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var response = await client.GetAsync("/api/search?query=");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -81,7 +89,7 @@ public sealed class SearchEndpointContractTests : IClassFixture<WebApplicationFa
     [Fact]
     public async Task Search_valid_query_returns_200_OK_and_SearchApiResponse()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var response = await client.GetAsync("/api/search?query=procurement%20decree&topK=3");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -95,7 +103,7 @@ public sealed class SearchEndpointContractTests : IClassFixture<WebApplicationFa
     [Fact]
     public async Task Search_ResponseContainsRerankScoreAndFinalRank()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var response = await client.GetAsync("/api/search?query=procurement%20decree&topK=3");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -113,7 +121,7 @@ public sealed class SearchEndpointContractTests : IClassFixture<WebApplicationFa
     [Fact]
     public async Task Search_does_not_leak_internal_exception_details_or_sensitive_fields()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
 
         var response = await client.GetAsync("/api/search?query=valid");
 

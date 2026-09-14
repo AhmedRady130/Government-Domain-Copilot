@@ -116,8 +116,10 @@ public static class OrchestrationEndpoints
         .WithName("MultiAgentOrchestrate")
         .WithTags("Orchestration")
         .WithSummary("Run multi-agent orchestration pipeline")
+        .RequireAuthorization()
         .Produces<OrchestrationApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status500InternalServerError);
 
@@ -155,10 +157,12 @@ public static class OrchestrationEndpoints
             return Results.Ok(dto);
         })
         .WithName("GetApprovalRequest")
+        .RequireAuthorization()
         .Produces<PendingApprovalDto>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound);
 
-        // 3. Submit Approval Decision (Approve / Reject / Edit)
+        // 3. Submit Approval Decision (Approve / Reject / Edit) - Supervisor Only
         endpoints.MapPost("/api/approvals/{requestId}/decide", async (
             string requestId,
             ApprovalDecisionApiRequest? request,
@@ -229,11 +233,14 @@ public static class OrchestrationEndpoints
             }
         })
         .WithName("SubmitApprovalDecision")
+        .RequireAuthorization("SupervisorOnly")
         .Produces<PendingApprovalDto>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status404NotFound);
 
-        // 4. Safe Consequential Action Execution (Blocked until Approved/Edited)
+        // 4. Safe Consequential Action Execution (Blocked until Approved/Edited) - Supervisor Only
         endpoints.MapPost("/api/approvals/{requestId}/execute", async (
             string requestId,
             IApprovalManager approvalManager,
@@ -272,8 +279,11 @@ public static class OrchestrationEndpoints
             }
         })
         .WithName("ExecuteApprovedAction")
+        .RequireAuthorization("SupervisorOnly")
         .Produces<ApprovalExecutionApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status404NotFound);
 
         // 4b. List Approvals for Tenant
@@ -303,7 +313,9 @@ public static class OrchestrationEndpoints
         .WithTags("Approvals")
         .WithSummary("List all approval requests for the authenticated tenant")
         .WithDescription("Retrieves all pending and decided human approval requests for the authenticated server-side tenant.")
-        .Produces<IReadOnlyList<PendingApprovalDto>>(StatusCodes.Status200OK);
+        .RequireAuthorization()
+        .Produces<IReadOnlyList<PendingApprovalDto>>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized);
 
         // 5. Streaming Orchestration (Server-Sent Events)
         endpoints.MapPost("/api/orchestrate/stream", async (
@@ -376,8 +388,10 @@ public static class OrchestrationEndpoints
             }
         })
         .WithName("StreamingOrchestrate")
+        .RequireAuthorization()
         .Produces(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound);
 
         return endpoints;

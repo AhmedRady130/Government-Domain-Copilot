@@ -10,6 +10,13 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapGet("/health", () => Results.Ok(new { status = "Healthy" }))
+    .AllowAnonymous()
+    .WithName("HealthCheck");
+
 app.MapDocumentEndpoints();
 app.MapSearchEndpoints();
 app.MapAnswerEndpoints();

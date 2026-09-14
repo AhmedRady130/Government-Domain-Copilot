@@ -52,7 +52,9 @@ public static class RunEndpoints
         .WithTags("Runs")
         .WithSummary("List orchestration runs for the authenticated tenant")
         .WithDescription("Retrieves a paginated list of orchestration run traces scoped strictly to the authenticated server-side tenant.")
-        .Produces<IReadOnlyList<RunSummaryApiResponse>>(StatusCodes.Status200OK);
+        .RequireAuthorization()
+        .Produces<IReadOnlyList<RunSummaryApiResponse>>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized);
 
         // GET /api/runs/{runId}
         endpoints.MapGet("/api/runs/{runId}", async (
@@ -145,8 +147,10 @@ public static class RunEndpoints
         .WithTags("Runs")
         .WithSummary("Get orchestration run details by RunId")
         .WithDescription("Retrieves full details for a single orchestration run trace if it exists and belongs to the authenticated tenant.")
+        .RequireAuthorization()
         .Produces<RunDetailApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound);
 
         return endpoints;

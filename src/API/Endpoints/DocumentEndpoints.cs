@@ -89,9 +89,11 @@ public static class DocumentEndpoints
         .WithName("IngestDocument")
         .WithTags("Documents")
         .WithSummary("Ingest a document")
+        .RequireAuthorization()
         .Produces<IngestDocumentApiResponse>(StatusCodes.Status201Created)
         .Produces<IngestDocumentApiResponse>(StatusCodes.Status422UnprocessableEntity)
         .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status500InternalServerError);
 
@@ -133,7 +135,9 @@ public static class DocumentEndpoints
         .WithTags("Documents")
         .WithSummary("Get document details and ingestion status by ID")
         .WithDescription("Retrieves document metadata, ingestion status, and chunk count for the authenticated tenant.")
+        .RequireAuthorization()
         .Produces<DocumentDetailApiResponse>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound);
 
         return endpoints;

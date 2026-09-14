@@ -91,8 +91,10 @@ public static class SearchEndpoints
             }
         })
         .WithName("HybridSearch")
+        .RequireAuthorization()
         .Produces<SearchApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status500InternalServerError);
 

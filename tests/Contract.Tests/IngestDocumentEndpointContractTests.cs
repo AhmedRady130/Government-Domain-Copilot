@@ -4,6 +4,7 @@ using System.Text.Json;
 using GovernmentDomainCopilot.API.Models;
 using GovernmentDomainCopilot.Application.Documents;
 using GovernmentDomainCopilot.Application.Documents.Models;
+using GovernmentDomainCopilot.Infrastructure.Auth;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -59,10 +60,17 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
         });
     }
 
+    private HttpClient CreateOfficerClient()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(ApiKeyAuthenticationOptions.HeaderName, SeedAuthIdentities.TenantAOfficer.ApiKey);
+        return client;
+    }
+
     [Fact]
     public async Task Ingest_valid_document_returns_201_Created_and_typed_response()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var payload = new IngestDocumentApiRequest("Executive Decree 404", "gov-ref-404", "First line of Decree.\nSecond line of Decree.");
 
         var response = await client.PostAsJsonAsync("/api/documents", payload);
@@ -79,7 +87,7 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
     [Fact]
     public async Task Ingest_missing_title_returns_400_BadRequest()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var payload = new IngestDocumentApiRequest(string.Empty, "gov-ref-empty-title", "Some valid source text.");
 
         var response = await client.PostAsJsonAsync("/api/documents", payload);
@@ -93,7 +101,7 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
     [Fact]
     public async Task Ingest_missing_source_text_returns_400_BadRequest()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var payload = new IngestDocumentApiRequest("Valid Title", "gov-ref-empty-text", "   ");
 
         var response = await client.PostAsJsonAsync("/api/documents", payload);
@@ -107,7 +115,7 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
     [Fact]
     public async Task Ingest_oversized_title_returns_400_BadRequest()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var oversizedTitle = new string('T', 501);
         var payload = new IngestDocumentApiRequest(oversizedTitle, "gov-ref-oversized-title", "Valid source text.");
 
@@ -119,7 +127,7 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
     [Fact]
     public async Task Ingest_oversized_source_reference_returns_400_BadRequest()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var oversizedRef = new string('R', 2001);
         var payload = new IngestDocumentApiRequest("Valid Title", oversizedRef, "Valid source text.");
 
@@ -131,7 +139,7 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
     [Fact]
     public async Task Ingest_oversized_source_text_returns_400_BadRequest()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var oversizedText = new string('A', 500_001);
         var payload = new IngestDocumentApiRequest("Valid Title", "gov-ref-oversized-text", oversizedText);
 
@@ -143,7 +151,7 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
     [Fact]
     public async Task Client_payload_attempting_to_supply_TenantId_is_ignored_by_api()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var customTenantId = Guid.NewGuid();
 
         var jsonPayload = JsonSerializer.Serialize(new
@@ -172,7 +180,7 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
     [Fact]
     public async Task Client_supplied_header_cannot_override_configured_development_tenant_identity()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var spoofedHeaderTenantId = Guid.NewGuid();
 
         client.DefaultRequestHeaders.Add("X-Tenant-ID", spoofedHeaderTenantId.ToString());
@@ -201,7 +209,7 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
     [Fact]
     public async Task API_does_not_leak_internal_exception_details()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
 
         var content = new System.Net.Http.StringContent("{ invalid json }", System.Text.Encoding.UTF8, "application/json");
         var response = await client.PostAsync("/api/documents", content);
@@ -217,7 +225,7 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
     [Fact]
     public async Task Ingestion_produces_expected_document_and_chunk_count_in_persistence()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var defaultTenantId = GovernmentDomainCopilot.Infrastructure.Tenancy.DevelopmentTenantContext.DefaultDevelopmentTenantId;
 
         var payload = new IngestDocumentApiRequest("Multi-chunk Decree", "gov-ref-multi-chunk", "Chunk 1 text.\n\nChunk 2 text.\n\nChunk 3 text.");
@@ -256,6 +264,7 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
         });
 
         var client = factoryWithFailingChunker.CreateClient();
+        client.DefaultRequestHeaders.Add(ApiKeyAuthenticationOptions.HeaderName, SeedAuthIdentities.TenantAOfficer.ApiKey);
         var payload = new IngestDocumentApiRequest("Failing Decree Title", "gov-ref-failing-doc", "Corrupted source text content.");
 
         var response = await client.PostAsJsonAsync("/api/documents", payload);
