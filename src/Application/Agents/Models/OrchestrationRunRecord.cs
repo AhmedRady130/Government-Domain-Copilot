@@ -17,4 +17,5 @@ public sealed record OrchestrationRunRecord(
     string? FallbackReason,
     GroundedAnswerResponse? FinalResponse,
     ApprovalRequest? PendingApproval,
-    string? FailureReason = null);
+    string? FailureReason = null,
+    string? SessionId = null);

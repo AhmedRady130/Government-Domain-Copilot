@@ -22,6 +22,9 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
     private readonly OrchestrationOptions _options;
     private readonly ILogger<SequentialPipelineOrchestrator> _logger;
 
+    private readonly GovernmentDomainCopilot.Application.Traces.Abstractions.IRunTraceStore? _runTraceStore;
+    private readonly GovernmentDomainCopilot.Application.Sessions.Abstractions.ISessionStore? _sessionStore;
+
     private static readonly string[] PipelineRoles =
     {
         "Eligibility Identifier Agent",
@@ -37,7 +40,9 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
         IGroundedAnswerUseCase groundedAnswerUseCase,
         ITenantContext tenantContext,
         IOptions<OrchestrationOptions> options,
-        ILogger<SequentialPipelineOrchestrator> logger)
+        ILogger<SequentialPipelineOrchestrator> logger,
+        GovernmentDomainCopilot.Application.Traces.Abstractions.IRunTraceStore? runTraceStore = null,
+        GovernmentDomainCopilot.Application.Sessions.Abstractions.ISessionStore? sessionStore = null)
     {
         _agents = agents ?? throw new ArgumentNullException(nameof(agents));
         _tools = tools ?? throw new ArgumentNullException(nameof(tools));
@@ -45,16 +50,38 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
         _tenantContext = tenantContext ?? throw new ArgumentNullException(nameof(tenantContext));
         _options = options?.Value ?? new OrchestrationOptions();
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _runTraceStore = runTraceStore;
+        _sessionStore = sessionStore;
+    }
+
+    public IAsyncEnumerable<StreamProgressEvent> OrchestrateStreamAsync(
+        string userQuery,
+        string? correlationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        return OrchestrateStreamAsync(userQuery, correlationId, sessionId: null, cancellationToken);
     }
 
     public async IAsyncEnumerable<StreamProgressEvent> OrchestrateStreamAsync(
         string userQuery,
-        string? correlationId = null,
+        string? correlationId,
+        string? sessionId,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var tenantId = _tenantContext.GetTenantId();
+
+        if (!string.IsNullOrWhiteSpace(sessionId) && _sessionStore != null)
+        {
+            var session = await _sessionStore.GetSessionAsync(sessionId, tenantId, cancellationToken);
+            if (session == null)
+            {
+                throw new KeyNotFoundException($"Session '{sessionId}' was not found for tenant '{tenantId}'.");
+            }
+        }
+
         var runId = $"run-{Guid.NewGuid():N}";
         var resolvedCorrelationId = correlationId ?? $"corr-{Guid.NewGuid():N}";
+        var startedAt = DateTimeOffset.UtcNow;
 
         var channel = Channel.CreateUnbounded<StreamProgressEvent>(
             new UnboundedChannelOptions
@@ -74,6 +101,8 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, _options.TimeoutSeconds)));
             var pipelineCt = cts.Token;
+            var agentExecutions = new List<AgentExecutionRecord>();
+            int iterationCount = 0;
 
             try
             {
@@ -85,7 +114,6 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
                     .OrderBy(a => Array.IndexOf(PipelineRoles, a.Role) >= 0 ? Array.IndexOf(PipelineRoles, a.Role) : int.MaxValue)
                     .ToList();
 
-                int iterationCount = 0;
                 foreach (var agent in orderedAgents)
                 {
                     iterationCount++;
@@ -106,6 +134,16 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
                         .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
 
                     var agentResult = await ExecuteAgentWithRetryAsync(agent, context, allowedTools, pipelineCt);
+
+                    agentExecutions.Add(new AgentExecutionRecord(
+                        agent.Role,
+                        DateTimeOffset.UtcNow.Subtract(agentResult.Duration),
+                        DateTimeOffset.UtcNow,
+                        agentResult.Duration,
+                        agentResult.Success,
+                        agentResult.ToolCalls,
+                        agentResult.Output,
+                        agentResult.ErrorMessage));
 
                     foreach (var tc in agentResult.ToolCalls)
                     {
@@ -149,6 +187,25 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
 
                             if (fallbackResponse.Status == GroundedAnswerStatus.Grounded)
                             {
+                                var fallbackSuccessRecord = new OrchestrationRunRecord(
+                                    RunId: runId,
+                                    CorrelationId: resolvedCorrelationId,
+                                    TenantId: tenantId,
+                                    PatternName: PatternName,
+                                    StartedAt: startedAt,
+                                    CompletedAt: DateTimeOffset.UtcNow,
+                                    Duration: totalStopwatch.Elapsed,
+                                    Status: "CompletedWithFallback",
+                                    IterationCount: iterationCount,
+                                    AgentExecutions: agentExecutions,
+                                    UsedFallback: true,
+                                    FallbackReason: "Orchestration failed; initiating Plain-RAG fallback.",
+                                    FinalResponse: fallbackResponse,
+                                    PendingApproval: null,
+                                    FailureReason: null,
+                                    SessionId: sessionId);
+                                await RecordTraceAndSessionAsync(fallbackSuccessRecord, sessionId, userQuery);
+
                                 sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
                                     StreamEventType.RunCompleted,
                                     "Pipeline", "CompletedWithFallback", totalStopwatch.ElapsedMilliseconds,
@@ -157,6 +214,25 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
                             }
                             else
                             {
+                                var fallbackFailedRecord = new OrchestrationRunRecord(
+                                    RunId: runId,
+                                    CorrelationId: resolvedCorrelationId,
+                                    TenantId: tenantId,
+                                    PatternName: PatternName,
+                                    StartedAt: startedAt,
+                                    CompletedAt: DateTimeOffset.UtcNow,
+                                    Duration: totalStopwatch.Elapsed,
+                                    Status: "Failed",
+                                    IterationCount: iterationCount,
+                                    AgentExecutions: agentExecutions,
+                                    UsedFallback: true,
+                                    FallbackReason: "Orchestration failed; initiating Plain-RAG fallback.",
+                                    FinalResponse: fallbackResponse,
+                                    PendingApproval: null,
+                                    FailureReason: fallbackResponse.Reason ?? "Fallback answer refused.",
+                                    SessionId: sessionId);
+                                await RecordTraceAndSessionAsync(fallbackFailedRecord, sessionId, userQuery);
+
                                 sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
                                     StreamEventType.RunFailed,
                                     "Pipeline", "Failed", totalStopwatch.ElapsedMilliseconds,
@@ -164,6 +240,25 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
                                 return;
                             }
                         }
+
+                        var agentFailedRecord = new OrchestrationRunRecord(
+                            RunId: runId,
+                            CorrelationId: resolvedCorrelationId,
+                            TenantId: tenantId,
+                            PatternName: PatternName,
+                            StartedAt: startedAt,
+                            CompletedAt: DateTimeOffset.UtcNow,
+                            Duration: totalStopwatch.Elapsed,
+                            Status: "Failed",
+                            IterationCount: iterationCount,
+                            AgentExecutions: agentExecutions,
+                            UsedFallback: false,
+                            FallbackReason: null,
+                            FinalResponse: null,
+                            PendingApproval: null,
+                            FailureReason: agentResult.ErrorMessage,
+                            SessionId: sessionId);
+                        await RecordTraceAndSessionAsync(agentFailedRecord, sessionId, userQuery);
 
                         sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
                             StreamEventType.RunFailed,
@@ -186,6 +281,29 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
 
                 var finalResponse = context.GetState<GroundedAnswerResponse>("GroundedAnswerResponse");
                 var pendingApproval = context.GetState<ApprovalRequest>("PendingApprovalRequest");
+
+                var finalStatus = (finalResponse != null && finalResponse.Status == GroundedAnswerStatus.Grounded)
+                    ? "Completed"
+                    : "Refused";
+
+                var normalRecord = new OrchestrationRunRecord(
+                    RunId: runId,
+                    CorrelationId: resolvedCorrelationId,
+                    TenantId: tenantId,
+                    PatternName: PatternName,
+                    StartedAt: startedAt,
+                    CompletedAt: DateTimeOffset.UtcNow,
+                    Duration: totalStopwatch.Elapsed,
+                    Status: finalStatus,
+                    IterationCount: iterationCount,
+                    AgentExecutions: agentExecutions,
+                    UsedFallback: false,
+                    FallbackReason: null,
+                    FinalResponse: finalResponse,
+                    PendingApproval: pendingApproval,
+                    FailureReason: finalStatus == "Refused" ? (finalResponse?.Reason ?? "Structural citation validation failed or answer refused.") : null,
+                    SessionId: sessionId);
+                await RecordTraceAndSessionAsync(normalRecord, sessionId, userQuery);
 
                 // Final-Answer Integrity: RunCompleted may ONLY represent a successfully validated response
                 if (finalResponse != null && finalResponse.Status == GroundedAnswerStatus.Grounded)
@@ -210,6 +328,25 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                var cancelledRecord = new OrchestrationRunRecord(
+                    RunId: runId,
+                    CorrelationId: resolvedCorrelationId,
+                    TenantId: tenantId,
+                    PatternName: PatternName,
+                    StartedAt: startedAt,
+                    CompletedAt: DateTimeOffset.UtcNow,
+                    Duration: totalStopwatch.Elapsed,
+                    Status: "Cancelled",
+                    IterationCount: iterationCount,
+                    AgentExecutions: agentExecutions,
+                    UsedFallback: false,
+                    FallbackReason: null,
+                    FinalResponse: null,
+                    PendingApproval: null,
+                    FailureReason: "Orchestration was cancelled by caller.",
+                    SessionId: sessionId);
+                await RecordTraceAndSessionAsync(cancelledRecord, sessionId, userQuery);
+
                 // Explicit caller cancellation: emit RunCancelled, never fallback, never execute side effects
                 sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
                     StreamEventType.RunCancelled,
@@ -218,6 +355,25 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
             }
             catch (OperationCanceledException)
             {
+                var timeoutRecord = new OrchestrationRunRecord(
+                    RunId: runId,
+                    CorrelationId: resolvedCorrelationId,
+                    TenantId: tenantId,
+                    PatternName: PatternName,
+                    StartedAt: startedAt,
+                    CompletedAt: DateTimeOffset.UtcNow,
+                    Duration: totalStopwatch.Elapsed,
+                    Status: "Failed",
+                    IterationCount: iterationCount,
+                    AgentExecutions: agentExecutions,
+                    UsedFallback: false,
+                    FallbackReason: null,
+                    FinalResponse: null,
+                    PendingApproval: null,
+                    FailureReason: $"Orchestration timed out after {_options.TimeoutSeconds} seconds.",
+                    SessionId: sessionId);
+                await RecordTraceAndSessionAsync(timeoutRecord, sessionId, userQuery);
+
                 // Timeout
                 sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
                     StreamEventType.RunFailed,
@@ -226,6 +382,25 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
             }
             catch (Exception ex)
             {
+                var failedRecord = new OrchestrationRunRecord(
+                    RunId: runId,
+                    CorrelationId: resolvedCorrelationId,
+                    TenantId: tenantId,
+                    PatternName: PatternName,
+                    StartedAt: startedAt,
+                    CompletedAt: DateTimeOffset.UtcNow,
+                    Duration: totalStopwatch.Elapsed,
+                    Status: "Failed",
+                    IterationCount: iterationCount,
+                    AgentExecutions: agentExecutions,
+                    UsedFallback: false,
+                    FallbackReason: null,
+                    FinalResponse: null,
+                    PendingApproval: null,
+                    FailureReason: ex.Message,
+                    SessionId: sessionId);
+                await RecordTraceAndSessionAsync(failedRecord, sessionId, userQuery);
+
                 _logger.LogWarning(ex, "Streaming orchestration failed for RunId={RunId}.", runId);
                 sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
                     StreamEventType.RunFailed,
@@ -251,12 +426,31 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
         }
     }
 
-    public async Task<OrchestrationRunRecord> OrchestrateAsync(
+    public Task<OrchestrationRunRecord> OrchestrateAsync(
         string userQuery,
         string? correlationId = null,
         CancellationToken cancellationToken = default)
     {
+        return OrchestrateAsync(userQuery, correlationId, sessionId: null, cancellationToken);
+    }
+
+    public async Task<OrchestrationRunRecord> OrchestrateAsync(
+        string userQuery,
+        string? correlationId,
+        string? sessionId,
+        CancellationToken cancellationToken = default)
+    {
         var tenantId = _tenantContext.GetTenantId();
+
+        if (!string.IsNullOrWhiteSpace(sessionId) && _sessionStore != null)
+        {
+            var session = await _sessionStore.GetSessionAsync(sessionId, tenantId, cancellationToken);
+            if (session == null)
+            {
+                throw new KeyNotFoundException($"Session '{sessionId}' was not found for tenant '{tenantId}'.");
+            }
+        }
+
         var runId = $"run-{Guid.NewGuid():N}";
         var resolvedCorrelationId = correlationId ?? $"corr-{Guid.NewGuid():N}";
         var startedAt = DateTimeOffset.UtcNow;
@@ -387,7 +581,7 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
                 ? "Cancelled"
                 : (usedFallback ? "CompletedWithFallback" : "Failed"));
 
-        return new OrchestrationRunRecord(
+        var runRecord = new OrchestrationRunRecord(
             RunId: runId,
             CorrelationId: resolvedCorrelationId,
             TenantId: tenantId,
@@ -402,7 +596,64 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
             FallbackReason: fallbackReason,
             FinalResponse: finalResponse,
             PendingApproval: pendingApproval,
-            FailureReason: orchestrationSuccess ? null : failureReason);
+            FailureReason: orchestrationSuccess ? null : failureReason,
+            SessionId: sessionId);
+
+        await RecordTraceAndSessionAsync(runRecord, sessionId, userQuery);
+
+        return runRecord;
+    }
+
+    private async Task RecordTraceAndSessionAsync(
+        OrchestrationRunRecord runRecord,
+        string? sessionId,
+        string userQuery)
+    {
+        if (_runTraceStore != null)
+        {
+            try
+            {
+                await _runTraceStore.RecordRunAsync(runRecord, sessionId, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to record run trace for RunId={RunId}.", runRecord.RunId);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(sessionId) && _sessionStore != null)
+        {
+            try
+            {
+                await _sessionStore.AppendMessageAsync(
+                    sessionId,
+                    runRecord.TenantId,
+                    "user",
+                    userQuery,
+                    "UserQuery",
+                    null,
+                    runRecord.RunId,
+                    CancellationToken.None);
+
+                var answerText = runRecord.FinalResponse?.Answer
+                    ?? (runRecord.Status == "Refused" ? runRecord.FinalResponse?.Reason : runRecord.FailureReason)
+                    ?? "Run completed without an answer.";
+
+                await _sessionStore.AppendMessageAsync(
+                    sessionId,
+                    runRecord.TenantId,
+                    "assistant",
+                    answerText,
+                    runRecord.Status,
+                    runRecord.FinalResponse?.Citations,
+                    runRecord.RunId,
+                    CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to append session message for SessionId={SessionId}, RunId={RunId}.", sessionId, runRecord.RunId);
+            }
+        }
     }
 
     private async Task<AgentExecutionResult> ExecuteAgentWithRetryAsync(

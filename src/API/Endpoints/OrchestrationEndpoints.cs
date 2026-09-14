@@ -38,6 +38,7 @@ public static class OrchestrationEndpoints
                 var runRecord = await orchestrator.OrchestrateAsync(
                     request.Query,
                     request.CorrelationId,
+                    request.SessionId,
                     cancellationToken);
 
                 var citations = runRecord.FinalResponse?.Citations.Select(c => new CitationItemApiResponse(
@@ -89,9 +90,19 @@ public static class OrchestrationEndpoints
                     citations,
                     agentExecutions,
                     pendingApproval,
-                    runRecord.FailureReason);
+                    runRecord.FailureReason,
+                    runRecord.SessionId);
 
                 return Results.Ok(response);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                logger.LogWarning("Orchestration session lookup failed: {Message}", ex.Message);
+                return Results.NotFound(new
+                {
+                    error = "Not found",
+                    details = ex.Message
+                });
             }
             catch (Exception ex)
             {
@@ -103,8 +114,11 @@ public static class OrchestrationEndpoints
             }
         })
         .WithName("MultiAgentOrchestrate")
+        .WithTags("Orchestration")
+        .WithSummary("Run multi-agent orchestration pipeline")
         .Produces<OrchestrationApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status404NotFound)
         .Produces(StatusCodes.Status500InternalServerError);
 
         // 2. Retrieve Approval Request
@@ -262,6 +276,35 @@ public static class OrchestrationEndpoints
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status404NotFound);
 
+        // 4b. List Approvals for Tenant
+        endpoints.MapGet("/api/approvals", async (
+            IApprovalManager approvalManager,
+            ITenantContext tenantContext,
+            CancellationToken cancellationToken) =>
+        {
+            var tenantId = tenantContext.GetTenantId();
+            var list = await approvalManager.ListRequestsAsync(tenantId, cancellationToken);
+            var dtos = list.Select(apr => new PendingApprovalDto(
+                apr.RequestId,
+                apr.TenantId,
+                apr.ProposedAction,
+                apr.OriginalPayload,
+                apr.EditedPayload,
+                apr.Decision.ToString(),
+                apr.ReviewerComments,
+                apr.CreatedAt,
+                apr.DecidedAt,
+                apr.IsExecuted,
+                apr.ExecutedAt)).ToList();
+
+            return Results.Ok(dtos);
+        })
+        .WithName("ListApprovals")
+        .WithTags("Approvals")
+        .WithSummary("List all approval requests for the authenticated tenant")
+        .WithDescription("Retrieves all pending and decided human approval requests for the authenticated server-side tenant.")
+        .Produces<IReadOnlyList<PendingApprovalDto>>(StatusCodes.Status200OK);
+
         // 5. Streaming Orchestration (Server-Sent Events)
         endpoints.MapPost("/api/orchestrate/stream", async (
             OrchestrationApiRequest? request,
@@ -296,13 +339,19 @@ public static class OrchestrationEndpoints
             try
             {
                 await foreach (var evt in streamingOrchestrator.OrchestrateStreamAsync(
-                    request.Query, request.CorrelationId, cancellationToken))
+                    request.Query, request.CorrelationId, request.SessionId, cancellationToken))
                 {
                     var eventType = evt.EventType.ToString();
                     var data = System.Text.Json.JsonSerializer.Serialize(evt, sseOptions);
                     await httpResponse.WriteAsync($"event: {eventType}\ndata: {data}\n\n", cancellationToken);
                     await httpResponse.Body.FlushAsync(cancellationToken);
                 }
+            }
+            catch (KeyNotFoundException ex)
+            {
+                logger.LogWarning("Streaming orchestration session lookup failed: {Message}", ex.Message);
+                httpResponse.StatusCode = StatusCodes.Status404NotFound;
+                await httpResponse.WriteAsJsonAsync(new { error = "Not found", details = ex.Message }, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -328,7 +377,8 @@ public static class OrchestrationEndpoints
         })
         .WithName("StreamingOrchestrate")
         .Produces(StatusCodes.Status200OK)
-        .Produces(StatusCodes.Status400BadRequest);
+        .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status404NotFound);
 
         return endpoints;
     }

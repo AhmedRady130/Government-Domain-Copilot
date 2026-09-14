@@ -67,6 +67,10 @@ public static class DependencyInjection
         services.AddScoped<GovernmentDomainCopilot.Application.Answering.Abstractions.IChatCompletionProvider>(sp =>
             sp.GetRequiredService<GeminiChatCompletionProvider>());
 
+        // Durable PostgreSQL-backed Session History & Run Trace Stores (FR-7)
+        services.AddScoped<GovernmentDomainCopilot.Application.Sessions.Abstractions.ISessionStore, GovernmentDomainCopilot.Infrastructure.Sessions.PostgresSessionStore>();
+        services.AddScoped<GovernmentDomainCopilot.Application.Traces.Abstractions.IRunTraceStore, GovernmentDomainCopilot.Infrastructure.Traces.PostgresRunTraceStore>();
+
         return services;
     }
 }

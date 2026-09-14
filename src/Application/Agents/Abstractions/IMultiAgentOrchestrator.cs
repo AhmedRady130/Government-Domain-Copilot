@@ -11,4 +11,11 @@ public interface IMultiAgentOrchestrator : IStreamingOrchestrator
         string userQuery,
         string? correlationId = null,
         CancellationToken cancellationToken = default);
+
+    Task<OrchestrationRunRecord> OrchestrateAsync(
+        string userQuery,
+        string? correlationId,
+        string? sessionId,
+        CancellationToken cancellationToken = default) =>
+        OrchestrateAsync(userQuery, correlationId, cancellationToken);
 }
