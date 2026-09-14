@@ -9,6 +9,7 @@ using GovernmentDomainCopilot.Application.Embeddings.Abstractions;
 using GovernmentDomainCopilot.Application.Embeddings.Models;
 using GovernmentDomainCopilot.Application.Retrieval.Abstractions;
 using GovernmentDomainCopilot.Application.Retrieval.Models;
+using GovernmentDomainCopilot.Infrastructure.Auth;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -65,10 +66,24 @@ public sealed class OrchestrationEndpointContractTests : IClassFixture<WebApplic
         });
     }
 
+    private HttpClient CreateOfficerClient()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(ApiKeyAuthenticationOptions.HeaderName, SeedAuthIdentities.TenantAOfficer.ApiKey);
+        return client;
+    }
+
+    private HttpClient CreateSupervisorClient()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(ApiKeyAuthenticationOptions.HeaderName, SeedAuthIdentities.TenantASupervisor.ApiKey);
+        return client;
+    }
+
     [Fact]
     public async Task OrchestrateEndpoint_EmptyQuery_ReturnsBadRequest()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var response = await client.PostAsJsonAsync("/api/orchestrate", new OrchestrationApiRequest("   "));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -77,7 +92,7 @@ public sealed class OrchestrationEndpointContractTests : IClassFixture<WebApplic
     [Fact]
     public async Task OrchestrateEndpoint_ValidQuery_ReturnsOkWithContractSchema()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var response = await client.PostAsJsonAsync("/api/orchestrate", new OrchestrationApiRequest("How do I register a business?"));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -93,7 +108,8 @@ public sealed class OrchestrationEndpointContractTests : IClassFixture<WebApplic
     [Fact]
     public async Task ApprovalEndpoints_FullLifecycle_EnforcesApprovalBoundary()
     {
-        var client = _factory.CreateClient();
+        // Supervisor has all Officer permissions plus the SupervisorOnly decide/execute rights
+        var client = CreateSupervisorClient();
 
         // Step 1: Run orchestration to generate a pending approval
         var orchResponse = await client.PostAsJsonAsync("/api/orchestrate", new OrchestrationApiRequest("How do I get a permit?"));
@@ -135,7 +151,7 @@ public sealed class OrchestrationEndpointContractTests : IClassFixture<WebApplic
     [Fact]
     public async Task GetApproval_NonExistentId_ReturnsNotFound()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var response = await client.GetAsync("/api/approvals/non-existent-id");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }

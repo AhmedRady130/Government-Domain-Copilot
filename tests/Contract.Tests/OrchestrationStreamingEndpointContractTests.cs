@@ -12,6 +12,7 @@ using GovernmentDomainCopilot.Application.Embeddings.Models;
 using GovernmentDomainCopilot.Application.Retrieval.Abstractions;
 using GovernmentDomainCopilot.Application.Retrieval.Models;
 using GovernmentDomainCopilot.Application.Streaming.Models;
+using GovernmentDomainCopilot.Infrastructure.Auth;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -66,10 +67,17 @@ public sealed class OrchestrationStreamingEndpointContractTests : IClassFixture<
         });
     }
 
+    private HttpClient CreateOfficerClient()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(ApiKeyAuthenticationOptions.HeaderName, SeedAuthIdentities.TenantAOfficer.ApiKey);
+        return client;
+    }
+
     [Fact]
     public async Task Post_OrchestrateStream_EmptyQuery_Returns400BadRequest()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var response = await client.PostAsJsonAsync("/api/orchestrate/stream", new OrchestrationApiRequest("   "));
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -78,7 +86,7 @@ public sealed class OrchestrationStreamingEndpointContractTests : IClassFixture<
     [Fact]
     public async Task Post_OrchestrateStream_Returns200_WithTextEventStreamContentType()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var response = await client.PostAsJsonAsync("/api/orchestrate/stream", new OrchestrationApiRequest("How do I register a business?"));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -89,7 +97,7 @@ public sealed class OrchestrationStreamingEndpointContractTests : IClassFixture<
     [Fact]
     public async Task Post_OrchestrateStream_StreamsValidEvents_WithRunStarted_AndRunCompleted()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var response = await client.PostAsJsonAsync("/api/orchestrate/stream", new OrchestrationApiRequest("How do I register a business?"));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -121,7 +129,7 @@ public sealed class OrchestrationStreamingEndpointContractTests : IClassFixture<
     [Fact]
     public async Task Post_OrchestrateStream_ClientTenantSpoofing_IsIgnored_AlwaysScopedToServerTenant()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var spoofedTenantId = Guid.NewGuid();
 
         // Attempt client tenant spoofing via custom header
@@ -150,7 +158,7 @@ public sealed class OrchestrationStreamingEndpointContractTests : IClassFixture<
     [Fact]
     public async Task Post_OrchestrateStream_TerminalEvent_IsAlwaysOneOfTerminalTypes()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var response = await client.PostAsJsonAsync("/api/orchestrate/stream", new OrchestrationApiRequest("What documents are required?"));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);

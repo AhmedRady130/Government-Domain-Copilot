@@ -25,6 +25,7 @@ public sealed class DevelopmentTenantContext : ITenantContext
     public static readonly Guid DefaultDevelopmentTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
     private readonly Guid _configuredTenantId;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
 
     public DevelopmentTenantContext(
         IConfiguration configuration,
@@ -32,6 +33,7 @@ public sealed class DevelopmentTenantContext : ITenantContext
         IHttpContextAccessor? httpContextAccessor = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
+        _httpContextAccessor = httpContextAccessor;
 
         if (environment != null && !environment.IsDevelopment())
         {
@@ -58,8 +60,20 @@ public sealed class DevelopmentTenantContext : ITenantContext
 
     public Guid GetTenantId()
     {
-        // Multi-tenancy security: client-supplied headers (e.g. X-Tenant-ID) are NEVER authoritative.
-        // The configured development tenant is the only authoritative identity.
+        // 1. If an authenticated user exists, extract TenantId from their claims
+        var user = _httpContextAccessor?.HttpContext?.User;
+        if (user?.Identity?.IsAuthenticated == true)
+        {
+            var tenantClaim = user.FindFirst("tenant_id")?.Value
+                ?? user.FindFirst("TenantId")?.Value;
+
+            if (Guid.TryParse(tenantClaim, out var claimTenantId) && claimTenantId != Guid.Empty)
+            {
+                return claimTenantId;
+            }
+        }
+
+        // 2. Otherwise fall back to the configured development tenant ID
         return _configuredTenantId;
     }
 }

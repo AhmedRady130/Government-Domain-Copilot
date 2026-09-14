@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -11,6 +11,7 @@ using GovernmentDomainCopilot.Application.Embeddings.Abstractions;
 using GovernmentDomainCopilot.Application.Embeddings.Models;
 using GovernmentDomainCopilot.Application.Retrieval.Abstractions;
 using GovernmentDomainCopilot.Application.Retrieval.Models;
+using GovernmentDomainCopilot.Infrastructure.Auth;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -67,10 +68,17 @@ public sealed class RunAndSessionEndpointContractTests : IClassFixture<WebApplic
         });
     }
 
+    private HttpClient CreateOfficerClient()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(ApiKeyAuthenticationOptions.HeaderName, SeedAuthIdentities.TenantAOfficer.ApiKey);
+        return client;
+    }
+
     [Fact]
     public async Task SessionLifecycle_Create_List_Get_Messages_Succeeds()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
 
         // 1. Create Session
         var createResponse = await client.PostAsJsonAsync("/api/sessions", new CreateSessionApiRequest("Citizen Service Inquiry"));
@@ -116,7 +124,7 @@ public sealed class RunAndSessionEndpointContractTests : IClassFixture<WebApplic
     [Fact]
     public async Task PostSessionMessage_OversizedContent_ReturnsBadRequest()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var createResponse = await client.PostAsJsonAsync("/api/sessions", new CreateSessionApiRequest("Oversized Test"));
         Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
         var session = await createResponse.Content.ReadFromJsonAsync<SessionApiResponse>();
@@ -133,7 +141,7 @@ public sealed class RunAndSessionEndpointContractTests : IClassFixture<WebApplic
     [Fact]
     public async Task RunsEndpoints_ListAndGet_AfterOrchestration_Succeeds()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
 
         // 1. Run orchestration
         var orchResponse = await client.PostAsJsonAsync("/api/orchestrate", new OrchestrationApiRequest("How do I register?"));
@@ -159,7 +167,7 @@ public sealed class RunAndSessionEndpointContractTests : IClassFixture<WebApplic
     [Fact]
     public async Task GetRun_NonExistent_ReturnsNotFound()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var response = await client.GetAsync("/api/runs/non-existent-run-999");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
@@ -167,7 +175,7 @@ public sealed class RunAndSessionEndpointContractTests : IClassFixture<WebApplic
     [Fact]
     public async Task GetApprovals_ReturnsOk()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var response = await client.GetAsync("/api/approvals");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var approvals = await response.Content.ReadFromJsonAsync<List<PendingApprovalDto>>();
@@ -177,7 +185,7 @@ public sealed class RunAndSessionEndpointContractTests : IClassFixture<WebApplic
     [Fact]
     public async Task TenantIsolation_ClientHeaderSpoofing_IsIgnored()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         client.DefaultRequestHeaders.Add("X-Tenant-ID", Guid.NewGuid().ToString());
 
         var sessionsResponse = await client.GetAsync("/api/sessions");

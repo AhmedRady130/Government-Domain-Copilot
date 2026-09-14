@@ -19,6 +19,15 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
+// --- Argument Validation: Reject spoofed tenant-id flags ---
+if (args.Any(a => a.Equals("--tenant-id", StringComparison.OrdinalIgnoreCase) || a.StartsWith("--tenant-id=", StringComparison.OrdinalIgnoreCase)))
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.Error.WriteLine("Error: Arbitrary --tenant-id parameter is forbidden. Tenant identity must come exclusively from authenticated credentials.");
+    Console.ResetColor();
+    return 1;
+}
+
 // --- Help Display ---
 if (args.Length == 0 || args[0] is "--help" or "-h" or "help")
 {
@@ -26,11 +35,69 @@ if (args.Length == 0 || args[0] is "--help" or "-h" or "help")
     return 0;
 }
 
+var command = args[0].ToLowerInvariant();
+var rawCommandArgs = args.Skip(1).ToArray();
+
+// --- FR-8: API Key Authentication (Development/Test synthetic identities) ---
+string? cliApiKey = null;
+var commandArgsList = new List<string>();
+for (int i = 0; i < rawCommandArgs.Length; i++)
+{
+    if (rawCommandArgs[i] == "--api-key" && i + 1 < rawCommandArgs.Length)
+    {
+        cliApiKey = rawCommandArgs[++i];
+    }
+    else
+    {
+        commandArgsList.Add(rawCommandArgs[i]);
+    }
+}
+var commandArgs = commandArgsList.ToArray();
+
+GovernmentDomainCopilot.Infrastructure.Auth.TestUserRecord? identity = null;
+if (cliApiKey != null)
+{
+    identity = GovernmentDomainCopilot.Infrastructure.Auth.SeedAuthIdentities.FindByApiKey(cliApiKey);
+    if (identity == null)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.Error.WriteLine("Authentication failed: invalid or unrecognized API key.");
+        Console.ResetColor();
+        return 1;
+    }
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine($"Authenticated as: {identity.DisplayName} [{identity.Role}] (Tenant: {identity.TenantId})");
+    Console.ResetColor();
+}
+else
+{
+    Console.ForegroundColor = ConsoleColor.DarkYellow;
+    Console.WriteLine("Notice: Running in Development/Test mode with default development tenant context. (Use --api-key for authenticated user).");
+    Console.ResetColor();
+}
+
+// --- FR-8: Server-side Role Authorization Gate for CLI ---
+if (command is "approve" or "reject" or "execute-approval")
+{
+    if (identity == null ||
+        !string.Equals(
+            identity.Role,
+            GovernmentDomainCopilot.Domain.Constants.Roles.Supervisor,
+            StringComparison.OrdinalIgnoreCase))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.Error.WriteLine(
+            $"Access Denied: The '{command}' command requires an authenticated '{GovernmentDomainCopilot.Domain.Constants.Roles.Supervisor}'.");
+        Console.ResetColor();
+        return 1;
+    }
+}
+
 // --- Configuration & DI ---
 var inMemoryConfig = new Dictionary<string, string?>
 {
     ["ConnectionStrings:GovernmentDomainCopilot"] = "Host=localhost;Database=cli_default",
-    ["Tenant:DevelopmentTenantId"] = "11111111-1111-1111-1111-111111111111",
+    ["Tenant:DevelopmentTenantId"] = identity?.TenantId.ToString() ?? "11111111-1111-1111-1111-111111111111",
     ["Logging:LogLevel:Default"] = "Warning"
 };
 
@@ -50,14 +117,31 @@ services.AddLogging(b =>
 services.AddApplication();
 services.AddInfrastructure(configuration);
 
+if (identity != null)
+{
+    var existingTenantContext = services.FirstOrDefault(d => d.ServiceType == typeof(ITenantContext));
+    if (existingTenantContext != null) services.Remove(existingTenantContext);
+
+    var existingUserContext = services.FirstOrDefault(d => d.ServiceType == typeof(ICurrentUserContext));
+    if (existingUserContext != null) services.Remove(existingUserContext);
+
+    services.AddScoped<ICurrentUserContext>(_ => new CliUserContext(identity));
+    services.AddScoped<ITenantContext>(_ => new CliTenantContext(identity.TenantId));
+}
+
 var connectionString = configuration.GetConnectionString("GovernmentDomainCopilot");
 if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("cli_default"))
 {
     // CLI fallback: use InMemory database for safe local runs when no postgres is configured
-    var existingDbRegistration = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<GovernmentDomainCopilotDbContext>));
-    if (existingDbRegistration != null)
+    var efServices = services.Where(d =>
+        d.ServiceType.Namespace?.StartsWith("Microsoft.EntityFrameworkCore") == true ||
+        d.ServiceType.Namespace?.StartsWith("Npgsql") == true ||
+        (d.ImplementationType != null && d.ImplementationType.Namespace?.StartsWith("Npgsql") == true) ||
+        d.ServiceType.Name.Contains("DbContext")).ToList();
+
+    foreach (var s in efServices)
     {
-        services.Remove(existingDbRegistration);
+        services.Remove(s);
     }
     services.AddDbContext<GovernmentDomainCopilotDbContext>(options =>
     {
@@ -68,7 +152,7 @@ if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("cl
 
 var serviceProvider = services.BuildServiceProvider();
 
-// Pre-seed default development tenant and user in DbContext
+// Pre-seed tenant and user in DbContext for the active tenant context
 using (var scope = serviceProvider.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<GovernmentDomainCopilotDbContext>();
@@ -77,15 +161,17 @@ using (var scope = serviceProvider.CreateScope())
 
     if (!db.Tenants.Any(t => t.Id == tenantId))
     {
-        db.Tenants.Add(new GovernmentDomainCopilot.Domain.Entities.Tenant(tenantId, "CLI Default Tenant", DateTimeOffset.UtcNow));
+        db.Tenants.Add(new GovernmentDomainCopilot.Domain.Entities.Tenant(tenantId, $"Tenant {tenantId}", DateTimeOffset.UtcNow));
         db.Users.Add(new GovernmentDomainCopilot.Domain.Entities.User(
-            Guid.NewGuid(), tenantId, "cli-operator", "CLI Operator", DateTimeOffset.UtcNow));
+            identity?.UserId ?? Guid.NewGuid(),
+            tenantId,
+            identity?.ExternalId ?? "cli-operator",
+            identity?.DisplayName ?? "CLI Operator",
+            DateTimeOffset.UtcNow,
+            identity?.Role ?? "Officer"));
         db.SaveChanges();
     }
 }
-
-var command = args[0].ToLowerInvariant();
-var commandArgs = args.Skip(1).ToArray();
 
 try
 {
@@ -737,10 +823,15 @@ static async Task<int> HandleExecuteApprovalAsync(IServiceProvider sp, string[] 
 static void PrintHelp()
 {
     Console.WriteLine("================================================================================");
-    Console.WriteLine(" Government Domain Copilot — Client CLI (FR-7)");
+    Console.WriteLine(" Government Domain Copilot — Client CLI (FR-7 / FR-8)");
     Console.WriteLine("================================================================================");
     Console.WriteLine();
     Console.WriteLine("Usage: dotnet run --project src/ClientCli -- <command> [arguments]");
+    Console.WriteLine();
+    Console.WriteLine("Global Options:");
+    Console.WriteLine("  --api-key <key>    Authenticate with a synthetic test API key (FR-8).");
+    Console.WriteLine("                     Required for production use; optional in dev mode.");
+    Console.WriteLine("                     Never log or commit real API keys.");
     Console.WriteLine();
     Console.WriteLine("Available Commands:");
     Console.WriteLine();
@@ -788,4 +879,20 @@ static void PrintHelp()
     Console.WriteLine("  Tenant context is enforced server-side through ITenantContext configuration.");
     Console.WriteLine("  Client commands cannot arbitrarily spoof or override tenant identity.");
     Console.WriteLine();
+}
+
+internal sealed class CliUserContext(GovernmentDomainCopilot.Infrastructure.Auth.TestUserRecord? user) : ICurrentUserContext
+{
+    public bool IsAuthenticated => user != null;
+    public Guid? UserId => user?.UserId;
+    public string? ExternalId => user?.ExternalId;
+    public string? DisplayName => user?.DisplayName;
+    public Guid? TenantId => user?.TenantId;
+    public IReadOnlyList<string> Roles => user != null ? new[] { user.Role } : Array.Empty<string>();
+    public bool IsInRole(string role) => user != null && string.Equals(user.Role, role, StringComparison.OrdinalIgnoreCase);
+}
+
+internal sealed class CliTenantContext(Guid tenantId) : ITenantContext
+{
+    public Guid GetTenantId() => tenantId;
 }

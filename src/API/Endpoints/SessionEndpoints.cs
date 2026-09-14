@@ -48,8 +48,10 @@ public static class SessionEndpoints
         .WithTags("Sessions")
         .WithSummary("Create a new conversation session")
         .WithDescription("Creates a new server-side conversation session scoped strictly to the authenticated tenant.")
+        .RequireAuthorization()
         .Produces<SessionApiResponse>(StatusCodes.Status201Created)
-        .Produces(StatusCodes.Status400BadRequest);
+        .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized);
 
         // 2. GET /api/sessions — List Sessions
         endpoints.MapGet("/api/sessions", async (
@@ -83,7 +85,9 @@ public static class SessionEndpoints
         .WithTags("Sessions")
         .WithSummary("List conversation sessions for authenticated tenant")
         .WithDescription("Retrieves a paginated list of conversation sessions for the authenticated tenant ordered by last activity.")
-        .Produces<IReadOnlyList<SessionApiResponse>>(StatusCodes.Status200OK);
+        .RequireAuthorization()
+        .Produces<IReadOnlyList<SessionApiResponse>>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized);
 
         // 3. GET /api/sessions/{sessionId} — Get Session Detail
         endpoints.MapGet("/api/sessions/{sessionId}", async (
@@ -130,8 +134,10 @@ public static class SessionEndpoints
         .WithTags("Sessions")
         .WithSummary("Get conversation session by ID")
         .WithDescription("Retrieves session metadata by ID if it exists and belongs to the authenticated tenant.")
+        .RequireAuthorization()
         .Produces<SessionApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound);
 
         // 4. GET /api/sessions/{sessionId}/messages — Get Session Messages
@@ -187,8 +193,10 @@ public static class SessionEndpoints
         .WithTags("Sessions")
         .WithSummary("Get message history for a conversation session")
         .WithDescription("Retrieves the chronological list of messages in a session for the authenticated tenant.")
+        .RequireAuthorization()
         .Produces<IReadOnlyList<SessionMessageApiResponse>>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound);
 
         // 5. POST /api/sessions/{sessionId}/messages — Post Message & Generate Answer
@@ -334,8 +342,10 @@ public static class SessionEndpoints
         .WithTags("Sessions")
         .WithSummary("Post message to session and generate assistant response")
         .WithDescription("Submits a user message to an active conversation session, invokes the grounded answer or orchestration pipeline, and returns the assistant reply.")
+        .RequireAuthorization()
         .Produces<SessionMessageApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound);
 
         return endpoints;

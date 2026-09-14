@@ -55,6 +55,7 @@ public sealed class GovernmentDomainCopilotDbContext(
         ConfigureTenantOwnedEntity(entity, "Users");
         entity.Property(item => item.ExternalId).HasMaxLength(200).IsRequired();
         entity.Property(item => item.DisplayName).HasMaxLength(200).IsRequired();
+        entity.Property(item => item.Role).HasMaxLength(50).HasDefaultValue("Officer").IsRequired();
         entity.Property(item => item.CreatedAtUtc).IsRequired();
         entity.HasIndex(item => new { item.TenantId, item.ExternalId }).IsUnique();
     }

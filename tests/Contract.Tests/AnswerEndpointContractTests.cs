@@ -7,6 +7,7 @@ using GovernmentDomainCopilot.Application.Embeddings.Abstractions;
 using GovernmentDomainCopilot.Application.Embeddings.Models;
 using GovernmentDomainCopilot.Application.Retrieval.Abstractions;
 using GovernmentDomainCopilot.Application.Retrieval.Models;
+using GovernmentDomainCopilot.Infrastructure.Auth;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -66,10 +67,21 @@ public sealed class AnswerEndpointContractTests : IClassFixture<WebApplicationFa
         });
     }
 
+    /// <summary>
+    /// Creates an authenticated HTTP client with the Officer API key.
+    /// All existing contract test scenarios test behaviour under valid authenticated identity.
+    /// </summary>
+    private HttpClient CreateOfficerClient()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(ApiKeyAuthenticationOptions.HeaderName, SeedAuthIdentities.TenantAOfficer.ApiKey);
+        return client;
+    }
+
     [Fact]
     public async Task PostAnswer_ValidQuery_Returns200OKWithGroundedStatusAndCitations()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var request = new GroundedAnswerApiRequest("What is the tender filing fee?");
 
         var response = await client.PostAsJsonAsync("/api/answer", request);
@@ -88,7 +100,7 @@ public sealed class AnswerEndpointContractTests : IClassFixture<WebApplicationFa
     [Fact]
     public async Task PostAnswer_EmptyQuery_Returns400BadRequest()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var request = new GroundedAnswerApiRequest("");
 
         var response = await client.PostAsJsonAsync("/api/answer", request);
@@ -99,7 +111,7 @@ public sealed class AnswerEndpointContractTests : IClassFixture<WebApplicationFa
     [Fact]
     public async Task PostAnswer_CallerCannotSupplyTenantId()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         // Post payload with unknown JSON property "tenantId"
         var jsonPayload = new { query = "tender filing fee", tenantId = Guid.NewGuid().ToString() };
 
@@ -116,7 +128,7 @@ public sealed class AnswerEndpointContractTests : IClassFixture<WebApplicationFa
     [Fact]
     public async Task PostAnswer_CallerCannotSwitchTenantViaHeader()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var spoofedTenantId = Guid.NewGuid();
         client.DefaultRequestHeaders.Add("X-Tenant-ID", spoofedTenantId.ToString());
 
@@ -134,7 +146,7 @@ public sealed class AnswerEndpointContractTests : IClassFixture<WebApplicationFa
     [Fact]
     public async Task PostAnswer_DoesNotLeakInternalProviderErrorsOrSecrets()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var request = new GroundedAnswerApiRequest("valid query");
 
         var response = await client.PostAsJsonAsync("/api/answer", request);
@@ -149,7 +161,7 @@ public sealed class AnswerEndpointContractTests : IClassFixture<WebApplicationFa
     [Fact]
     public async Task PostAnswer_ResponseContainsCitationsOnlyForRetrievedEvidence()
     {
-        var client = _factory.CreateClient();
+        var client = CreateOfficerClient();
         var request = new GroundedAnswerApiRequest("tender filing fee");
 
         var response = await client.PostAsJsonAsync("/api/answer", request);
