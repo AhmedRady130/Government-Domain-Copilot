@@ -1,0 +1,91 @@
+erDiagram
+    Tenants ||--o{ Users : owns
+    Tenants ||--o{ Documents : owns
+    Documents ||--o{ DocumentChunks : contains
+    Tenants ||--o{ DocumentChunks : scopes
+    Tenants ||--o{ ConversationSessions : owns
+    Users ||--o{ ConversationSessions : owns
+    Tenants ||--o{ Runs : scopes
+    ConversationSessions ||--o{ Runs : contains
+    Runs ||--o{ Approvals : has
+    Tenants ||--o{ Approvals : scopes
+    Users ||--o{ AuditLogs : acts_in
+    Tenants ||--o{ AuditLogs : scopes
+    Tenants ||--o{ UserSessions : owns
+    UserSessions ||--o{ SessionMessages : contains
+    Tenants ||--o{ SessionMessages : scopes
+    Tenants ||--o{ OrchestrationRunTraces : scopes
+    Tenants ||--o{ LlmInvocationTraces : scopes
+
+    Tenants {
+        uuid Id PK
+        string Name
+    }
+    Users {
+        uuid Id PK
+        uuid TenantId FK
+        string ExternalId
+        string Role
+    }
+    Documents {
+        uuid Id PK
+        uuid TenantId FK
+        string Title
+        string SourceReference
+    }
+    DocumentChunks {
+        uuid Id PK
+        uuid TenantId FK
+        uuid DocumentId FK
+        int Sequence
+        vector Embedding
+        tsvector SearchVector
+    }
+    ConversationSessions {
+        uuid Id PK
+        uuid TenantId FK
+        uuid UserId FK
+    }
+    Runs {
+        uuid Id PK
+        uuid TenantId FK
+        uuid ConversationSessionId FK
+        string Status
+    }
+    Approvals {
+        uuid Id PK
+        uuid TenantId FK
+        uuid RunId FK
+        string Status
+    }
+    AuditLogs {
+        uuid Id PK
+        uuid TenantId FK
+        uuid ActorUserId FK
+        string EventType
+    }
+    UserSessions {
+        string SessionId PK
+        uuid TenantId FK
+        string Status
+    }
+    SessionMessages {
+        string MessageId PK
+        string SessionId FK
+        uuid TenantId FK
+        string LinkedRunId
+    }
+    OrchestrationRunTraces {
+        string RunId PK
+        uuid TenantId FK
+        string CorrelationId
+        string SessionId
+        string Status
+    }
+    LlmInvocationTraces {
+        uuid Id PK
+        uuid TenantId FK
+        string CorrelationId
+        string RunId
+        string ProviderName
+    }

@@ -1,0 +1,55 @@
+flowchart LR
+    subgraph api[API layer]
+        endpoints[Minimal API endpoints\nDocuments, Search, Answer, Orchestrate,\nApprovals, Sessions, Runs, Traces]
+        auth[API-key authentication + RBAC]
+        tenant[CurrentUserContext /\nDevelopmentTenantContext]
+        sse[SSE endpoint +\nCorrelation middleware]
+    end
+
+    subgraph app[Application layer]
+        ingest[IIngestDocumentUseCase]
+        retrieve[HybridSearchUseCase\nVector + keyword + RRF + rerank]
+        answer[GroundedAnswerUseCase\nSufficiency + bounded evidence + citations]
+        orchestrator[SequentialPipelineOrchestrator\nEligibility → Procedure → Response draft]
+        approval[IApprovalManager]
+        stores[Session / run / LLM trace abstractions]
+        chat[IChatCompletionProvider]
+    end
+
+    subgraph infra[Infrastructure layer]
+        chunker[DeterministicDocumentChunker]
+        repos[Document repository +\nPgVector/PgKeyword retrievers]
+        persistence[EF Core repositories / stores\nGovernmentDomainCopilotDbContext]
+        gemini[Gemini chat / embedding adapters]
+        ollama[Ollama chat / embedding adapters]
+    end
+
+    db[(PostgreSQL + pgvector)]
+    provider[Gemini API or configured\nlocal Ollama server]
+
+    endpoints --> auth --> tenant
+    endpoints --> ingest
+    endpoints --> retrieve
+    endpoints --> answer
+    endpoints --> orchestrator
+    endpoints --> approval
+    sse --> orchestrator
+    ingest --> chunker --> repos
+    retrieve --> repos
+    answer --> retrieve
+    orchestrator --> retrieve
+    orchestrator --> answer
+    orchestrator --> approval
+    answer --> chat
+    chat --> gemini
+    chat --> ollama
+    repos --> persistence --> db
+    approval --> persistence
+    stores --> persistence
+    gemini --> provider
+    ollama --> provider
+
+    classDef layer fill:#d9ead3,stroke:#38761d,color:#000;
+    classDef external fill:#cfe2f3,stroke:#1155cc,color:#000;
+    class endpoints,auth,tenant,sse,ingest,retrieve,answer,orchestrator,approval,stores,chat,chunker,repos,persistence layer;
+    class db,provider external;

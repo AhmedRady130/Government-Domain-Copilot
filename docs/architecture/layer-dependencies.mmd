@@ -1,0 +1,20 @@
+flowchart RL
+    domain[Domain\nEntities and invariants]
+    application[Application\nUse cases and abstractions]
+    infrastructure[Infrastructure\nEF Core, PostgreSQL, providers]
+    hosts[API and ClientCli\nOuter delivery hosts]
+
+    application -->|allowed reference| domain
+    infrastructure -->|allowed reference| application
+    infrastructure -->|allowed reference| domain
+    hosts -->|allowed composition reference| infrastructure
+    hosts -->|allowed use-case reference| application
+
+    domain -. prohibited: no framework, DB, provider, or web dependency .-> application
+    application -. prohibited: no Infrastructure/API dependency .-> infrastructure
+    domain -. prohibited: no Infrastructure/API dependency .-> hosts
+
+    classDef core fill:#d9ead3,stroke:#38761d,color:#000;
+    classDef outer fill:#cfe2f3,stroke:#1155cc,color:#000;
+    class domain,application core;
+    class infrastructure,hosts outer;

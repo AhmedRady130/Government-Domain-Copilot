@@ -154,7 +154,7 @@ Each orchestration run produces an `OrchestrationRunRecord` containing:
 1. **`RunStarted`**: Emitted once orchestration begins, containing `RunId`, `CorrelationId`, and server-authenticated `TenantId`.
 2. **`AgentStarted`**: Emitted when each specialized agent in the pipeline initiates analysis.
 3. **`ToolStarted` / `ToolCompleted`**: Emitted during tool execution (`DocumentSearchTool`, `EligibilityLookupTool`, `ProcedureLookupTool`, `DraftApprovalTool`).
-4. **`AnswerChunk`**: Emitted incrementally as partial token deltas arrive from the upstream LLM provider (`GeminiChatCompletionProvider.StreamCompleteAsync`).
+4. **`AnswerChunk`**: Emitted incrementally as partial token deltas arrive from the configured Gemini or Ollama chat-completion provider.
 5. **`ApprovalRequired`**: Emitted when `DraftApprovalTool` queues a pending approval request for human supervisor review.
 6. **`FallbackStarted`**: Emitted if orchestration fails and Plain-RAG fallback is triggered.
 7. **Terminal Events (Guaranteed Exactly One)**:

@@ -1,0 +1,32 @@
+flowchart LR
+    subgraph clientBoundary[Untrusted client boundary]
+        client[Officer / supervisor client\nQuery, API credential]
+    end
+    subgraph serviceBoundary[Government Domain Copilot trust boundary]
+        auth[Authentication, RBAC,\nserver-side tenant resolution]
+        app[Application use cases\nGrounding, citations, orchestration]
+        evidence[Retrieved evidence\nUntrusted data; bounded context]
+        approval[Supervisor approval authority]
+        secrets[Environment/configuration\nDB string, Gemini API key, provider URL]
+        db[(Tenant-scoped PostgreSQL)]
+    end
+    subgraph providerBoundary[External LLM-provider boundary]
+        provider[Gemini or configured Ollama]
+    end
+
+    client -->|query + authentication credential| auth
+    auth -->|authenticated tenant context| app
+    app -->|tenant-scoped read/write| db
+    db -->|retrieved chunks| evidence
+    evidence -->|bounded factual data| app
+    secrets -->|server-side config only| app
+    app -->|system instruction, user question, bounded evidence,\nmodel/generation settings; provider key if Gemini| provider
+    provider -->|completion tokens / usage when available| app
+    app -->|stage request only| approval
+
+    classDef trusted fill:#d9ead3,stroke:#38761d,color:#000;
+    classDef external fill:#cfe2f3,stroke:#1155cc,color:#000;
+    classDef untrusted fill:#f4cccc,stroke:#cc0000,color:#000;
+    class auth,app,approval,secrets,db trusted;
+    class provider external;
+    class client,evidence untrusted;
