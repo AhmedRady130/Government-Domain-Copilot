@@ -102,11 +102,28 @@ public static class DependencyInjection
                 client.Timeout = TimeSpan.FromSeconds(options.HttpTimeoutSeconds);
             }
         });
+        services.AddHttpClient<OllamaChatCompletionProvider>((sp, client) =>
+        {
+            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LlmProviderOptions>>().Value;
+            if (options.HttpTimeoutSeconds > 0)
+            {
+                client.Timeout = TimeSpan.FromSeconds(options.HttpTimeoutSeconds);
+            }
+        });
 
         services.AddSingleton<IEmbeddingProvider, GeminiEmbeddingProvider>();
         services.AddSingleton<IEmbeddingProvider, OllamaEmbeddingProvider>();
         services.AddScoped<GovernmentDomainCopilot.Application.Answering.Abstractions.IChatCompletionProvider>(sp =>
-            sp.GetRequiredService<GeminiChatCompletionProvider>());
+        {
+            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<LlmProviderOptions>>().Value;
+            ValidateLlmOptions(options);
+            return options.PrimaryProvider.Trim() switch
+            {
+                GeminiChatCompletionProvider.Name => sp.GetRequiredService<GeminiChatCompletionProvider>(),
+                OllamaChatCompletionProvider.Name => sp.GetRequiredService<OllamaChatCompletionProvider>(),
+                var provider => throw new InvalidOperationException($"Configured chat completion provider '{provider}' is not registered.")
+            };
+        });
 
         // Durable PostgreSQL-backed Session History & Run Trace Stores (FR-7)
         services.AddScoped<GovernmentDomainCopilot.Application.Sessions.Abstractions.ISessionStore, GovernmentDomainCopilot.Infrastructure.Sessions.PostgresSessionStore>();
@@ -129,5 +146,19 @@ public static class DependencyInjection
         services.AddScoped<ILlmTraceStore, PostgresLlmTraceStore>();
 
         return services;
+    }
+
+    private static void ValidateLlmOptions(LlmProviderOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(options.PrimaryProvider))
+            throw new InvalidOperationException("LlmProviders:PrimaryProvider must be configured.");
+        if (string.IsNullOrWhiteSpace(options.PrimaryModel))
+            throw new InvalidOperationException("LlmProviders:PrimaryModel must be configured.");
+        if (options.HttpTimeoutSeconds <= 0)
+            throw new InvalidOperationException("LlmProviders:HttpTimeoutSeconds must be greater than zero.");
+        if (options.DefaultMaxOutputTokens <= 0)
+            throw new InvalidOperationException("LlmProviders:DefaultMaxOutputTokens must be greater than zero.");
+        if (options.DefaultTemperature is < 0 or > 2)
+            throw new InvalidOperationException("LlmProviders:DefaultTemperature must be between 0 and 2.");
     }
 }

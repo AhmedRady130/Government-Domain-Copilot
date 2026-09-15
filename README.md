@@ -16,6 +16,14 @@ Foundation for an agentic retrieval-augmented-generation platform in a governmen
 
 ## Features
 
+### Chat-completion providers
+
+Gemini is the default chat-completion provider. To use a local Ollama server instead,
+set `LLM_PRIMARY_PROVIDER=Ollama`, set `LLM_PRIMARY_MODEL` to an installed Ollama chat
+model, and set `LLM_OLLAMA_BASE_URL` to the server URL. Ollama uses no API key; it must
+be reachable only through server-side configuration. Gemini still reads its API key only
+from the environment.
+
 ### Document Ingestion Vertical Slice (MVP)
 
 - `POST /api/documents`: Ingests raw document text, normalises line endings/Unicode, deterministically chunks text, and persists `Document` and `DocumentChunk` entities atomically.
