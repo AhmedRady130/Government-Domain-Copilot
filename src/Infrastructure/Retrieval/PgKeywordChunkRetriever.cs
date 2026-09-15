@@ -32,14 +32,14 @@ public sealed class PgKeywordChunkRetriever : IKeywordChunkRetriever
             return await SearchInMemoryFallbackAsync(tenantId, query, topK, cancellationToken);
         }
 
-        var tsQuery = EF.Functions.WebSearchToTsQuery("simple", query);
-
         var dbQuery = from chunk in _dbContext.DocumentChunks
                       join doc in _dbContext.Documents
                           on new { chunk.TenantId, Id = chunk.DocumentId }
                           equals new { doc.TenantId, doc.Id }
-                      where chunk.TenantId == tenantId && EF.Property<NpgsqlTsVector>(chunk, "SearchVector").Matches(tsQuery)
-                      orderby EF.Property<NpgsqlTsVector>(chunk, "SearchVector").Rank(tsQuery) descending
+                      where chunk.TenantId == tenantId && EF.Property<NpgsqlTsVector>(chunk, "SearchVector")
+                          .Matches(EF.Functions.WebSearchToTsQuery("simple", query))
+                      orderby EF.Property<NpgsqlTsVector>(chunk, "SearchVector")
+                          .Rank(EF.Functions.WebSearchToTsQuery("simple", query)) descending
                       select new
                       {
                           ChunkId = chunk.Id,
@@ -48,7 +48,8 @@ public sealed class PgKeywordChunkRetriever : IKeywordChunkRetriever
                           Title = doc.Title,
                           SourceReference = doc.SourceReference,
                           Content = chunk.Content,
-                          Score = (double)EF.Property<NpgsqlTsVector>(chunk, "SearchVector").Rank(tsQuery)
+                          Score = (double)EF.Property<NpgsqlTsVector>(chunk, "SearchVector")
+                              .Rank(EF.Functions.WebSearchToTsQuery("simple", query))
                       };
 
         var rawResults = await dbQuery
