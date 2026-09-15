@@ -25,14 +25,22 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        Action<DbContextOptionsBuilder>? configureDatabase = null)
     {
-        var connectionString = configuration.GetConnectionString("GovernmentDomainCopilot")
-            ?? throw new InvalidOperationException(
-                "The 'GovernmentDomainCopilot' connection string must be configured.");
+        if (configureDatabase is not null)
+        {
+            services.AddDbContext<GovernmentDomainCopilotDbContext>(configureDatabase);
+        }
+        else
+        {
+            var connectionString = configuration.GetConnectionString("GovernmentDomainCopilot")
+                ?? throw new InvalidOperationException(
+                    "The 'GovernmentDomainCopilot' connection string must be configured.");
 
-        services.AddDbContext<GovernmentDomainCopilotDbContext>(options =>
-            options.UseNpgsql(connectionString, npgsqlOptions => npgsqlOptions.UseVector()));
+            services.AddDbContext<GovernmentDomainCopilotDbContext>(options =>
+                options.UseNpgsql(connectionString, npgsqlOptions => npgsqlOptions.UseVector()));
+        }
 
         services.Configure<ChunkingOptions>(
             configuration.GetSection(ChunkingOptions.SectionName));

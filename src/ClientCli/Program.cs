@@ -8,15 +8,19 @@ using GovernmentDomainCopilot.Application.Agents.Abstractions;
 using GovernmentDomainCopilot.Application.Agents.Models;
 using GovernmentDomainCopilot.Application.Answering.Abstractions;
 using GovernmentDomainCopilot.Application.Answering.Models;
+using GovernmentDomainCopilot.Application.Corpus;
 using GovernmentDomainCopilot.Application.Documents;
 using GovernmentDomainCopilot.Application.Documents.Commands;
 using GovernmentDomainCopilot.Application.Sessions.Abstractions;
 using GovernmentDomainCopilot.Application.Traces.Abstractions;
+using GovernmentDomainCopilot.Infrastructure.Configuration;
 using GovernmentDomainCopilot.Infrastructure;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 // --- Argument Validation: Reject spoofed tenant-id flags ---
@@ -37,6 +41,13 @@ if (args.Length == 0 || args[0] is "--help" or "-h" or "help")
 
 var command = args[0].ToLowerInvariant();
 var rawCommandArgs = args.Skip(1).ToArray();
+
+// Validation is intentionally a pure filesystem operation. It must not require
+// authentication configuration, EF Core, or a database connection.
+if (command == "validate-corpus")
+{
+    return HandleValidateCorpus();
+}
 
 // --- FR-8: API Key Authentication (Development/Test synthetic identities) ---
 string? cliApiKey = null;
@@ -69,7 +80,7 @@ if (cliApiKey != null)
     Console.WriteLine($"Authenticated as: {identity.DisplayName} [{identity.Role}] (Tenant: {identity.TenantId})");
     Console.ResetColor();
 }
-else
+else if (command != "seed-corpus")
 {
     Console.ForegroundColor = ConsoleColor.DarkYellow;
     Console.WriteLine("Notice: Running in Development/Test mode with default development tenant context. (Use --api-key for authenticated user).");
@@ -93,10 +104,17 @@ if (command is "approve" or "reject" or "execute-approval")
     }
 }
 
+if (command == "seed-corpus" && identity is null)
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.Error.WriteLine("Authentication required: 'seed-corpus' requires an authenticated API-key identity.");
+    Console.ResetColor();
+    return 1;
+}
+
 // --- Configuration & DI ---
 var inMemoryConfig = new Dictionary<string, string?>
 {
-    ["ConnectionStrings:GovernmentDomainCopilot"] = "Host=localhost;Database=cli_default",
     ["Tenant:DevelopmentTenantId"] = identity?.TenantId.ToString() ?? "11111111-1111-1111-1111-111111111111",
     ["Logging:LogLevel:Default"] = "Warning"
 };
@@ -108,6 +126,11 @@ var configuration = new ConfigurationBuilder()
     .Build();
 
 var services = new ServiceCollection();
+services.AddSingleton<IConfiguration>(configuration);
+services.AddSingleton<IHostEnvironment>(new CliHostEnvironment(
+    Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")
+    ?? Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
+    ?? Environments.Development));
 services.AddLogging(b =>
 {
     b.AddConsole();
@@ -115,7 +138,13 @@ services.AddLogging(b =>
 });
 
 services.AddApplication();
-services.AddInfrastructure(configuration);
+var useInMemoryDatabase = !DatabaseConnectionConfiguration.HasConfiguredConnectionString(configuration);
+services.AddInfrastructure(
+    configuration,
+    useInMemoryDatabase
+        ? options => options.UseInMemoryDatabase("GovernmentDomainCopilot_Cli")
+            .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning))
+        : null);
 
 if (identity != null)
 {
@@ -127,27 +156,6 @@ if (identity != null)
 
     services.AddScoped<ICurrentUserContext>(_ => new CliUserContext(identity));
     services.AddScoped<ITenantContext>(_ => new CliTenantContext(identity.TenantId));
-}
-
-var connectionString = configuration.GetConnectionString("GovernmentDomainCopilot");
-if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("cli_default"))
-{
-    // CLI fallback: use InMemory database for safe local runs when no postgres is configured
-    var efServices = services.Where(d =>
-        d.ServiceType.Namespace?.StartsWith("Microsoft.EntityFrameworkCore") == true ||
-        d.ServiceType.Namespace?.StartsWith("Npgsql") == true ||
-        (d.ImplementationType != null && d.ImplementationType.Namespace?.StartsWith("Npgsql") == true) ||
-        d.ServiceType.Name.Contains("DbContext")).ToList();
-
-    foreach (var s in efServices)
-    {
-        services.Remove(s);
-    }
-    services.AddDbContext<GovernmentDomainCopilotDbContext>(options =>
-    {
-        options.UseInMemoryDatabase("GovernmentDomainCopilot_Cli")
-               .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.InMemoryEventId.TransactionIgnoredWarning));
-    });
 }
 
 var serviceProvider = services.BuildServiceProvider();
@@ -182,6 +190,9 @@ try
     {
         case "ingest":
             return await HandleIngestAsync(sp, commandArgs);
+
+        case "seed-corpus":
+            return await HandleSeedCorpusAsync(sp);
 
         case "ask":
             return await HandleAskAsync(sp, commandArgs);
@@ -286,6 +297,72 @@ static async Task<int> HandleIngestAsync(IServiceProvider sp, string[] args)
     Console.WriteLine($"Status:      {result.Status}");
     Console.WriteLine($"Chunk Count: {result.ChunkCount}");
     return 0;
+}
+
+static int HandleValidateCorpus()
+{
+    var corpusDirectory = FindCorpusDirectory();
+    var manifest = CorpusManifest.Parse(File.ReadAllText(Path.Combine(corpusDirectory, "manifest.json")));
+    var validation = CorpusValidator.Validate(manifest, relativeFile => File.ReadAllText(Path.Combine(corpusDirectory, relativeFile)));
+    Console.WriteLine($"Documents: {validation.DocumentCount}");
+    Console.WriteLine($"Pages: {validation.PageCount}");
+    Console.WriteLine("Tenants: " + string.Join(", ", validation.TenantDistribution.OrderBy(p => p.Key).Select(p => $"{p.Key}={p.Value}")));
+    Console.WriteLine("Formats: " + string.Join(", ", validation.FormatDistribution.Select(p => $"{p.Key}={p.Value}")));
+    if (validation.IsValid)
+    {
+        Console.WriteLine("Corpus validation: PASS");
+        return 0;
+    }
+    foreach (var error in validation.Errors) Console.Error.WriteLine("ERROR: " + error);
+    return 1;
+}
+
+static async Task<int> HandleSeedCorpusAsync(IServiceProvider sp)
+{
+    if (HandleValidateCorpus() != 0) return 1;
+    var corpusDirectory = FindCorpusDirectory();
+    var manifest = CorpusManifest.Parse(await File.ReadAllTextAsync(Path.Combine(corpusDirectory, "manifest.json")));
+    var tenantId = sp.GetRequiredService<ITenantContext>().GetTenantId().ToString();
+    var documents = manifest.Documents.Where(d => string.Equals(d.TenantId, tenantId, StringComparison.OrdinalIgnoreCase)).ToList();
+    if (documents.Count == 0)
+    {
+        Console.Error.WriteLine("No corpus documents are assigned to the authenticated tenant.");
+        return 1;
+    }
+
+    var useCase = sp.GetRequiredService<IIngestDocumentUseCase>();
+    var failures = 0;
+    foreach (var document in documents)
+    {
+        try
+        {
+            var content = await File.ReadAllTextAsync(Path.Combine(corpusDirectory, document.File));
+            var result = await useCase.IngestAsync(new IngestDocumentCommand(document.Title, document.SourceReference, content), CancellationToken.None);
+            Console.WriteLine($"[OK] {document.Id}: {result.Status}, {result.ChunkCount} chunks");
+        }
+        catch (Exception ex)
+        {
+            failures++;
+            Console.Error.WriteLine($"[FAIL] {document.Id}: {ex.Message}");
+        }
+    }
+    Console.WriteLine($"Seed complete: {documents.Count - failures} succeeded, {failures} failed for authenticated tenant {tenantId}.");
+    return failures == 0 ? 0 : 1;
+}
+
+static string FindRepositoryRoot()
+{
+    for (var directory = new DirectoryInfo(Directory.GetCurrentDirectory()); directory != null; directory = directory.Parent)
+        if (File.Exists(Path.Combine(directory.FullName, "GovernmentDomainCopilot.sln"))) return directory.FullName;
+    throw new DirectoryNotFoundException("Could not find repository root containing GovernmentDomainCopilot.sln.");
+}
+
+static string FindCorpusDirectory()
+{
+    var publishedCorpusDirectory = Path.Combine(AppContext.BaseDirectory, "data", "corpus");
+    if (File.Exists(Path.Combine(publishedCorpusDirectory, "manifest.json"))) return publishedCorpusDirectory;
+
+    return Path.Combine(FindRepositoryRoot(), "data", "corpus");
 }
 
 static async Task<int> HandleAskAsync(IServiceProvider sp, string[] args)
@@ -838,6 +915,9 @@ static void PrintHelp()
     Console.WriteLine("  ingest             Ingest a government document into the retrieval store");
     Console.WriteLine("                     --title <title> --ref <sourceReference> (--file <path> | --text <text>)");
     Console.WriteLine();
+    Console.WriteLine("  seed-corpus        Ingest manifest-assigned synthetic corpus documents for the authenticated tenant");
+    Console.WriteLine("  validate-corpus    Validate committed corpus count, explicit pages, metadata and tenant distribution");
+    Console.WriteLine();
     Console.WriteLine("  ask                Generate an evidence-grounded answer or refusal for a query");
     Console.WriteLine("                     \"<query>\" [--top-k <k>] [--session-id <id>]");
     Console.WriteLine();
@@ -895,4 +975,12 @@ internal sealed class CliUserContext(GovernmentDomainCopilot.Infrastructure.Auth
 internal sealed class CliTenantContext(Guid tenantId) : ITenantContext
 {
     public Guid GetTenantId() => tenantId;
+}
+
+internal sealed class CliHostEnvironment(string environmentName) : IHostEnvironment
+{
+    public string EnvironmentName { get; set; } = environmentName;
+    public string ApplicationName { get; set; } = "GovernmentDomainCopilot.ClientCli";
+    public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
+    public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
 }

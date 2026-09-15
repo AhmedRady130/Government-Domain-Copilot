@@ -1,0 +1,326 @@
+{
+  "requiredDocumentCount": 30,
+  "requiredPageCount": 150,
+  "documents": [
+    {
+      "id": "synthetic-gov-01",
+      "title": "Business Registration and Renewal",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Business services",
+      "sourceReference": "synthetic://government-corpus/business-registration",
+      "file": "documents/synthetic-gov-01.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-02",
+      "title": "Home Occupancy Certificate",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Housing services",
+      "sourceReference": "synthetic://government-corpus/home-occupancy",
+      "file": "documents/synthetic-gov-02.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-03",
+      "title": "Birth Record Extract Request",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Civil records",
+      "sourceReference": "synthetic://government-corpus/birth-record",
+      "file": "documents/synthetic-gov-03.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-04",
+      "title": "Resident Address Update",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Civil records",
+      "sourceReference": "synthetic://government-corpus/address-update",
+      "file": "documents/synthetic-gov-04.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-05",
+      "title": "Community Market Stall Permit",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Commerce permits",
+      "sourceReference": "synthetic://government-corpus/market-permit",
+      "file": "documents/synthetic-gov-05.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-06",
+      "title": "Mobile Food Vendor Permit",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Commerce permits",
+      "sourceReference": "synthetic://government-corpus/food-vendor",
+      "file": "documents/synthetic-gov-06.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-07",
+      "title": "Small Building Plan Review",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Planning services",
+      "sourceReference": "synthetic://government-corpus/building-review",
+      "file": "documents/synthetic-gov-07.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-08",
+      "title": "Protected Tree Work Permission",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Environmental services",
+      "sourceReference": "synthetic://government-corpus/tree-work",
+      "file": "documents/synthetic-gov-08.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-09",
+      "title": "Large Waste Collection Request",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Environmental services",
+      "sourceReference": "synthetic://government-corpus/waste-collection",
+      "file": "documents/synthetic-gov-09.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-10",
+      "title": "Water Service Connection Review",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Utility services",
+      "sourceReference": "synthetic://government-corpus/water-connection",
+      "file": "documents/synthetic-gov-10.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-11",
+      "title": "Accessible Parking Permit Review",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Transport services",
+      "sourceReference": "synthetic://government-corpus/parking-permit",
+      "file": "documents/synthetic-gov-11.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-12",
+      "title": "Community Road Closure Notice",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Transport services",
+      "sourceReference": "synthetic://government-corpus/road-closure",
+      "file": "documents/synthetic-gov-12.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-13",
+      "title": "Municipal Library Access Card",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Community services",
+      "sourceReference": "synthetic://government-corpus/library-card",
+      "file": "documents/synthetic-gov-13.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-14",
+      "title": "Community Event Notice",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Community services",
+      "sourceReference": "synthetic://government-corpus/event-notice",
+      "file": "documents/synthetic-gov-14.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-15",
+      "title": "Youth Activity Grant Intake",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Community grants",
+      "sourceReference": "synthetic://government-corpus/youth-program",
+      "file": "documents/synthetic-gov-15.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-16",
+      "title": "Heritage District Sign Review",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Planning services",
+      "sourceReference": "synthetic://government-corpus/heritage-sign",
+      "file": "documents/synthetic-gov-16.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-17",
+      "title": "Companion Animal Licence",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Public health",
+      "sourceReference": "synthetic://government-corpus/animal-license",
+      "file": "documents/synthetic-gov-17.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-18",
+      "title": "Neighbourhood Noise Review",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Public health",
+      "sourceReference": "synthetic://government-corpus/noise-review",
+      "file": "documents/synthetic-gov-18.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-19",
+      "title": "Community Clinic Registration",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Public health",
+      "sourceReference": "synthetic://government-corpus/clinic-registration",
+      "file": "documents/synthetic-gov-19.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-20",
+      "title": "Approved Supplier List Application",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Procurement services",
+      "sourceReference": "synthetic://government-corpus/vendor-list",
+      "file": "documents/synthetic-gov-20.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-21",
+      "title": "Administrative Records Request",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Records services",
+      "sourceReference": "synthetic://government-corpus/records-request",
+      "file": "documents/synthetic-gov-21.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-22",
+      "title": "Accessible Translation Request",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Accessibility services",
+      "sourceReference": "synthetic://government-corpus/translation-request",
+      "file": "documents/synthetic-gov-22.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-23",
+      "title": "Local Support Benefit Screening",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Social services",
+      "sourceReference": "synthetic://government-corpus/benefit-screening",
+      "file": "documents/synthetic-gov-23.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-24",
+      "title": "Community Care Referral",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Social services",
+      "sourceReference": "synthetic://government-corpus/care-referral",
+      "file": "documents/synthetic-gov-24.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-25",
+      "title": "Property Rate Review Request",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Revenue services",
+      "sourceReference": "synthetic://government-corpus/property-rate",
+      "file": "documents/synthetic-gov-25.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-26",
+      "title": "Municipal Payment Plan Request",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Revenue services",
+      "sourceReference": "synthetic://government-corpus/payment-plan",
+      "file": "documents/synthetic-gov-26.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-27",
+      "title": "Fire Safety Advice Visit",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Safety services",
+      "sourceReference": "synthetic://government-corpus/fire-safety",
+      "file": "documents/synthetic-gov-27.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-28",
+      "title": "Emergency Contact Notice Update",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Safety services",
+      "sourceReference": "synthetic://government-corpus/emergency-notice",
+      "file": "documents/synthetic-gov-28.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-29",
+      "title": "Public Park Booking Request",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "Recreation services",
+      "sourceReference": "synthetic://government-corpus/park-booking",
+      "file": "documents/synthetic-gov-29.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-30",
+      "title": "Community Hall Hire Request",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "Recreation services",
+      "sourceReference": "synthetic://government-corpus/facility-hire",
+      "file": "documents/synthetic-gov-30.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-31",
+      "title": "Service Permit Amendment",
+      "tenantId": "11111111-1111-1111-1111-111111111111",
+      "category": "General administration",
+      "sourceReference": "synthetic://government-corpus/permit-amendment",
+      "file": "documents/synthetic-gov-31.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    },
+    {
+      "id": "synthetic-gov-32",
+      "title": "Administrative Service Complaint Review",
+      "tenantId": "22222222-2222-2222-2222-222222222222",
+      "category": "General administration",
+      "sourceReference": "synthetic://government-corpus/complaint-review",
+      "file": "documents/synthetic-gov-32.txt",
+      "pageCount": 5,
+      "isSynthetic": true
+    }
+  ]
+}

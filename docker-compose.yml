@@ -55,5 +55,20 @@ services:
       retries: 6
       start_period: 15s
 
+  cli:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: src/ClientCli/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ConnectionStrings__GovernmentDomainCopilot: Host=postgres;Port=5432;Database=${POSTGRES_DB:-government_domain_copilot};Username=${POSTGRES_USER:-government_domain_copilot};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
 volumes:
   postgres-data:

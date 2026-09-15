@@ -21,4 +21,12 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="9.0.19" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\..\data\corpus\**\*">
+      <Link>data\corpus\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

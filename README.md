@@ -68,6 +68,22 @@ Invoke-WebRequest http://localhost:8080/api/sessions `
 The initialization step deliberately does not seed a government corpus; that is
 reserved for the follow-up corpus-seeding work.
 
+## Synthetic D4 government corpus
+
+The committed synthetic corpus is in `data/corpus/`. It contains 32 documents
+and 160 explicit plain-text pages, with no real personal data. Validation is a
+pure filesystem/manifest check and does not require PostgreSQL. Seed each
+existing synthetic tenant with its authenticated development API key:
+
+```powershell
+dotnet run --project src/ClientCli -- validate-corpus
+docker compose run --rm cli seed-corpus --api-key gov-key-tenant-a-officer
+docker compose run --rm cli seed-corpus --api-key gov-key-tenant-b-officer
+```
+
+See [`docs/CORPUS.md`](docs/CORPUS.md) for the assessment mapping, metadata,
+page validation, safety, and idempotency details.
+
 ### Troubleshooting
 
 - **PostgreSQL not ready:** inspect `docker compose logs postgres`; check that
