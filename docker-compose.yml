@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-government_domain_copilot}
+      POSTGRES_USER: ${POSTGRES_USER:-government_domain_copilot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: src/API/Dockerfile
+    command: ["--migrate-only"]
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ConnectionStrings__GovernmentDomainCopilot: Host=postgres;Port=5432;Database=${POSTGRES_DB:-government_domain_copilot};Username=${POSTGRES_USER:-government_domain_copilot};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: src/API/Dockerfile
+    ports:
+      - "${API_PORT:-8080}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ConnectionStrings__GovernmentDomainCopilot: Host=postgres;Port=5432;Database=${POSTGRES_DB:-government_domain_copilot};Username=${POSTGRES_USER:-government_domain_copilot};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      EmbeddingProviders__PrimaryProvider: ${EMBEDDING_PRIMARY_PROVIDER:-Gemini}
+      EmbeddingProviders__FallbackProvider: ${EMBEDDING_FALLBACK_PROVIDER:-Ollama}
+      EmbeddingProviders__PrimaryModel: ${EMBEDDING_PRIMARY_MODEL:-gemini-embedding-2}
+      EmbeddingProviders__FallbackModel: ${EMBEDDING_FALLBACK_MODEL:-nomic-embed-text}
+      EmbeddingProviders__OllamaBaseUrl: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      LlmProviders__PrimaryModel: ${LLM_PRIMARY_MODEL:-gemini-2.5-flash}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --show-error http://localhost:8080/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  postgres-data:

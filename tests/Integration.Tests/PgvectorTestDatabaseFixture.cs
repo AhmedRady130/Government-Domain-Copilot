@@ -35,16 +35,19 @@ public sealed class PgvectorTestDatabaseFixture : IAsyncLifetime
                 .Build();
 
             await _postgreSqlContainer.StartAsync();
-            _connectionString = _postgreSqlContainer.GetConnectionString();
-            IsAvailable = true;
-            await InitializeDatabaseAsync();
         }
         catch
         {
-            // Docker unavailable — pgvector tests will skip rather than fall back to SQLite
+            // Docker unavailable — pgvector tests will skip rather than fall back to SQLite.
+            // Migration failures must not be mistaken for unavailable Docker.
             _postgreSqlContainer = null;
             IsAvailable = false;
+            return;
         }
+
+        _connectionString = _postgreSqlContainer.GetConnectionString();
+        IsAvailable = true;
+        await InitializeDatabaseAsync();
     }
 
     public GovernmentDomainCopilotDbContext CreateDbContext()

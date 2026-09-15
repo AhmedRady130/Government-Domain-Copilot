@@ -2,6 +2,7 @@ using GovernmentDomainCopilot.API.Endpoints;
 using GovernmentDomainCopilot.API.Middleware;
 using GovernmentDomainCopilot.Application;
 using GovernmentDomainCopilot.Infrastructure;
+using GovernmentDomainCopilot.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,6 +11,24 @@ builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
 var app = builder.Build();
+
+// Compose invokes this mode in a one-shot container before starting the API.
+// MigrateAsync uses EF's migration history, so it is safe to run repeatedly and
+// never recreates or drops an existing database.
+if (args.Contains("--migrate-only", StringComparer.OrdinalIgnoreCase))
+{
+    using var scope = app.Services.CreateScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<GovernmentDomainCopilotDbContext>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>()
+        .CreateLogger("DatabaseStartup");
+
+    await DatabaseStartupInitializer.InitializeAsync(
+        dbContext,
+        app.Environment.IsDevelopment(),
+        logger);
+
+    return;
+}
 
 // Return clean, safe error responses without leaking internal stack traces or server implementation details
 app.UseExceptionHandler(errorApp =>
@@ -56,7 +75,7 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "Healthy" }))
     .AllowAnonymous()
     .WithName("LivenessCheck");
 
-app.MapGet("/ready", async (GovernmentDomainCopilot.Infrastructure.Persistence.GovernmentDomainCopilotDbContext dbContext, CancellationToken cancellationToken) =>
+app.MapGet("/ready", async (GovernmentDomainCopilotDbContext dbContext, CancellationToken cancellationToken) =>
 {
     try
     {

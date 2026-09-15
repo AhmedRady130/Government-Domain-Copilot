@@ -8,13 +8,13 @@ namespace Integration.Tests;
 public sealed class InfrastructureRegistrationTests
 {
     [Fact]
-    public void AddInfrastructure_registers_the_PostgreSql_DbContext_without_connecting()
+    public void AddInfrastructure_registers_the_PostgreSql_DbContext_without_secrets_or_connecting()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:GovernmentDomainCopilot"] =
-                    "Host=localhost;Database=government_domain_copilot;Username=postgres;Password=test-placeholder"
+                    "Host=localhost;Database=government_domain_copilot;Username=postgres"
             })
             .Build();
         var services = new ServiceCollection();
