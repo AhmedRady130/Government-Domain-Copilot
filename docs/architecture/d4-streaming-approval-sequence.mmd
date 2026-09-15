@@ -1,0 +1,47 @@
+sequenceDiagram
+    actor Officer as Officer client
+    actor Supervisor as Supervisor
+    participant API as API / correlation middleware
+    participant Auth as Authentication + ITenantContext
+    participant Orch as Sequential orchestration
+    participant Retrieval as Tenant-scoped hybrid retrieval
+    participant Answer as GroundedAnswerUseCase
+    participant LLM as Configured Gemini or Ollama
+    participant DB as PostgreSQL / traces
+
+    Officer->>API: POST /api/orchestrate/stream (query)
+    API->>Auth: Authenticate API key and resolve claims
+    Auth-->>API: Authoritative tenant + role
+    API->>DB: Start tenant-scoped run trace
+    API->>Orch: OrchestrateStreamAsync(query, tenant context)
+    Orch-->>Officer: SSE RunStarted / AgentStarted
+    Orch->>Retrieval: Search evidence for authenticated tenant
+    Retrieval->>DB: Vector + keyword queries filtered by tenant
+    DB-->>Retrieval: Bounded candidates
+    Retrieval-->>Orch: RRF + reranked evidence
+    Orch->>Answer: Generate grounded draft
+    Answer->>Answer: Sufficiency check and bounded context
+    alt Insufficient evidence
+        Answer-->>Orch: Refused response; no provider call
+        Orch-->>Officer: SSE RunFailed / refusal
+    else Evidence sufficient
+        Answer->>LLM: System instruction + query + bounded evidence
+        LLM-->>Answer: Incremental completion tokens
+        Answer-->>Officer: SSE AnswerChunk (partial, unvalidated)
+        Answer->>Answer: Validate citations against retrieved evidence
+        alt Citation validation fails
+            Answer-->>Orch: Refused response
+            Orch-->>Officer: SSE RunFailed / refusal
+        else Citation validation succeeds
+            Orch->>DB: Persist finalized answer, run and LLM trace metadata
+            Orch->>DB: Create pending approval request
+            Orch-->>Officer: SSE ApprovalRequired then RunCompleted
+        end
+    end
+    Supervisor->>API: POST /api/approvals/{id}/decide
+    API->>Auth: Require SupervisorOnly + tenant scope
+    Auth-->>API: Authorized supervisor
+    API->>DB: Persist approval decision
+    Note over DB,Supervisor: Consequential execution remains blocked until approval
+    Supervisor->>API: POST /api/approvals/{id}/execute
+    API->>DB: Execute approved staged action and record outcome

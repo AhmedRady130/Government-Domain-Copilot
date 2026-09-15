@@ -1,0 +1,28 @@
+flowchart LR
+    citizen[Citizen\nTarget beneficiary]
+    officer[Government Officer\nAuthenticated MVP actor]
+    supervisor[Government Supervisor\nAuthenticated MVP actor]
+    system[Government Domain Copilot\nD4 grounded-response MVP]
+    postgres[(PostgreSQL + pgvector\nMVP)]
+    gemini[Google Gemini API\nConfigured external provider]
+    ollama[Local Ollama server\nOptional configured external provider]
+    corpus[Synthetic corpus files\nCommitted MVP assets]
+    idp[Production identity provider\nTarget only]
+    official[Official governed sources\nTarget only]
+
+    citizen -->|situation / receives officer-reviewed response| officer
+    officer -->|authenticated requests| system
+    supervisor -->|approve / reject / execute staged request| system
+    system -->|tenant-scoped persistence and retrieval| postgres
+    system -->|bounded completion / embedding requests| gemini
+    system -. optional local completion / embedding .-> ollama
+    corpus -->|validate / authenticated seed| system
+    idp -. trusted production identity .-> system
+    official -. governed source ingestion .-> system
+
+    classDef current fill:#d9ead3,stroke:#38761d,color:#000;
+    classDef external fill:#cfe2f3,stroke:#1155cc,color:#000;
+    classDef target fill:#fce5cd,stroke:#e69138,color:#000,stroke-dasharray: 5 5;
+    class system,postgres,corpus current;
+    class gemini,ollama external;
+    class idp,official,target;

@@ -1,0 +1,31 @@
+flowchart TB
+    client[Authenticated officer or supervisor\nHTTP/SSE client]
+    web[Angular Web project\nExists; not in assessment Compose stack]
+
+    subgraph compose[Local Docker Compose runtime]
+        api[API container\nASP.NET Core minimal API\nPort 8080]
+        migrate[Migrate container\nOne-shot --migrate-only]
+        cli[ClientCli container\nOpt-in tools profile / one-shot]
+        db[(PostgreSQL 16 + pgvector\nInternal only; no host port)]
+    end
+
+    evaluator[EvaluationRunner\nLocal .NET CLI]
+    corpus[Committed data/corpus\nManifest + synthetic text]
+    llm[Gemini or configured Ollama\nExternal provider boundary]
+
+    client -->|REST / SSE| api
+    web -. not deployed by Compose .-> api
+    api -->|EF Core / Npgsql| db
+    migrate -->|apply migration history| db
+    cli -->|authenticated seed| db
+    evaluator -->|evaluation use cases| db
+    cli -->|validate corpus / seed manifest| corpus
+    evaluator -->|golden dataset| corpus
+    api -->|chat / embedding HTTP| llm
+
+    classDef current fill:#d9ead3,stroke:#38761d,color:#000;
+    classDef external fill:#cfe2f3,stroke:#1155cc,color:#000;
+    classDef deferred fill:#fce5cd,stroke:#e69138,color:#000,stroke-dasharray: 5 5;
+    class api,migrate,cli,db,evaluator,corpus current;
+    class llm external;
+    class web deferred;
