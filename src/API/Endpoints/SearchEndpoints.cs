@@ -6,6 +6,10 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.RateLimiting;
+using GovernmentDomainCopilot.API.Security;
+using GovernmentDomainCopilot.Application.Observability;
 
 namespace GovernmentDomainCopilot.API.Endpoints;
 
@@ -17,6 +21,7 @@ public static class SearchEndpoints
             string? query,
             int? topK,
             IHybridSearchUseCase useCase,
+            IOptions<ApiSecurityOptions> securityOptions,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
@@ -30,6 +35,10 @@ public static class SearchEndpoints
                     details = "Query parameter is required and cannot be empty."
                 });
             }
+
+            var validationFailure = QueryRequestValidator.Validate(query, securityOptions.Value);
+            if (validationFailure is not null)
+                return validationFailure;
 
             var request = new VectorSearchRequest(query, topK);
 
@@ -63,17 +72,16 @@ public static class SearchEndpoints
             }
             catch (VectorSearchValidationException ex)
             {
-                logger.LogWarning("Search validation failed: {Message}", ex.Message);
+                logger.LogSafeFailure(ex, "HybridSearchValidationFailed", "HybridSearchEndpoint");
 
                 return Results.BadRequest(new
                 {
-                    error = "Validation failed",
-                    details = ex.Message
+                    error = "ValidationFailed"
                 });
             }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("tenant", StringComparison.OrdinalIgnoreCase))
+            catch (InvalidOperationException ex) when (IsTenantContextFailure(ex))
             {
-                logger.LogWarning("Tenant context operation rejected during search: {Message}", ex.Message);
+                logger.LogSafeFailure(ex, "TenantContextRejected", "HybridSearchEndpoint");
 
                 return Results.Problem(
                     statusCode: StatusCodes.Status403Forbidden,
@@ -82,7 +90,7 @@ public static class SearchEndpoints
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Unexpected error occurred during hybrid search.");
+                logger.LogSafeFailure(ex, "HybridSearchFailed", "HybridSearchEndpoint");
 
                 return Results.Problem(
                     statusCode: StatusCodes.Status500InternalServerError,
@@ -92,6 +100,7 @@ public static class SearchEndpoints
         })
         .WithName("HybridSearch")
         .RequireAuthorization()
+        .RequireRateLimiting(ApiRateLimitPolicies.AiWorkload)
         .Produces<SearchApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
@@ -100,4 +109,7 @@ public static class SearchEndpoints
 
         return endpoints;
     }
+
+    private static bool IsTenantContextFailure(InvalidOperationException exception) =>
+        exception.Message.Contains("tenant", StringComparison.OrdinalIgnoreCase);
 }

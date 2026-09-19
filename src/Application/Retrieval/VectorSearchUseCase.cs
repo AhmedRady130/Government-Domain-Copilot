@@ -4,6 +4,7 @@ using System.Diagnostics;
 using GovernmentDomainCopilot.Application.Abstractions;
 using GovernmentDomainCopilot.Application.Embeddings.Abstractions;
 using GovernmentDomainCopilot.Application.Embeddings.Models;
+using GovernmentDomainCopilot.Application.Observability;
 using GovernmentDomainCopilot.Application.Retrieval.Abstractions;
 using GovernmentDomainCopilot.Application.Retrieval.Exceptions;
 using GovernmentDomainCopilot.Application.Retrieval.Models;
@@ -64,7 +65,7 @@ public sealed class VectorSearchUseCase : IVectorSearchUseCase
         }
         catch (Exception ex) when (ex is not VectorSearchValidationException)
         {
-            _logger.LogError(ex, "Failed to generate query embedding for tenant {TenantId}.", tenantId);
+            _logger.LogSafeFailure(ex, "VectorEmbeddingGenerationFailed", "VectorSearchEmbedding", duration: stopwatch.Elapsed);
             throw new VectorSearchException("Failed to generate vector embedding for the search query.", ex);
         }
 
@@ -93,7 +94,7 @@ public sealed class VectorSearchUseCase : IVectorSearchUseCase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed executing vector similarity query for tenant {TenantId}.", tenantId);
+            _logger.LogSafeFailure(ex, "VectorRetrievalFailed", "VectorSearchRetrieval", duration: stopwatch.Elapsed);
             throw new VectorSearchException("Vector database search query failed.", ex);
         }
 

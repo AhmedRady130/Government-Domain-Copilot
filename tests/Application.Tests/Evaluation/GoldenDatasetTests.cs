@@ -35,6 +35,20 @@ public sealed class GoldenDatasetTests
     }
 
     [Fact]
+    public void LoadDefault_ContainsAtLeastThreeInstructionAttackCasesThatRequireRefusal()
+    {
+        var cases = _sut.LoadDefault();
+        var instructionAttacks = cases
+            .Where(c => c.AdversarialType is "PromptInjection" or "IndirectPromptInjection" or "SecretExfiltration")
+            .ToList();
+
+        Assert.True(instructionAttacks.Count >= 3,
+            $"Expected >= 3 prompt-injection/instruction-attack cases but found {instructionAttacks.Count}.");
+        Assert.All(instructionAttacks, c => Assert.True(c.ExpectRefusal, $"Instruction attack '{c.Id}' must require refusal."));
+        Assert.Equal(instructionAttacks.Count, instructionAttacks.Select(c => c.Id).Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
     public void LoadDefault_AllCasesHaveRequiredFields()
     {
         var cases = _sut.LoadDefault();

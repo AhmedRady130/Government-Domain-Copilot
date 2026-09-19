@@ -90,6 +90,20 @@ public sealed class OllamaEmbeddingProviderTests
         Assert.Equal(384, ex.ActualDimension);
     }
 
+    [Fact]
+    public async Task EmbedAsync_non_success_response_does_not_echo_response_body()
+    {
+        var httpHandler = new FakeHttpMessageHandler(HttpStatusCode.InternalServerError, "Provider detail: FAKE-TEST-VALUE");
+        var httpClient = new HttpClient(httpHandler);
+        var provider = new OllamaEmbeddingProvider(httpClient, Options.Create(_options), NullLogger<OllamaEmbeddingProvider>.Instance);
+
+        var ex = await Assert.ThrowsAsync<EmbeddingProviderUnavailableException>(
+            () => provider.EmbedAsync(new EmbeddingRequest(new[] { "Text" }), CancellationToken.None));
+
+        Assert.Equal("Ollama", ex.ProviderName);
+        Assert.Contains("500", ex.Message);
+        Assert.DoesNotContain("FAKE-TEST-VALUE", ex.Message);
+    }
     private sealed class FakeHttpMessageHandler(HttpStatusCode statusCode, string responseContent) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

@@ -60,9 +60,9 @@ public sealed class ProcedureLookupTool : IAgentTool
 
             return new ToolExecutionResult(true, outputJson);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return new ToolExecutionResult(false, "{}", ex.Message);
+            return new ToolExecutionResult(false, "{}", ToolFailureCodes.ExecutionFailed);
         }
     }
 }

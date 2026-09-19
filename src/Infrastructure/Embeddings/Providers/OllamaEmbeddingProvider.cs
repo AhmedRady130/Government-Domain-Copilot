@@ -9,6 +9,8 @@ using Microsoft.Extensions.Options;
 
 namespace GovernmentDomainCopilot.Infrastructure.Embeddings.Providers;
 
+using GovernmentDomainCopilot.Application.Observability;
+
 /// <summary>
 /// Infrastructure adapter for local Ollama alternative embedding provider.
 /// </summary>
@@ -56,12 +58,11 @@ public sealed class OllamaEmbeddingProvider : IEmbeddingProvider
 
             if (!response.IsSuccessStatusCode)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogWarning("Ollama API embedding request failed with HTTP {StatusCode}.", response.StatusCode);
 
                 throw new EmbeddingProviderUnavailableException(
                     Name,
-                    $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}. Details: {SanitizeErrorMessage(errorBody)}");
+                    $"HTTP {(int)response.StatusCode}.");
             }
 
             var responseData = await response.Content.ReadFromJsonAsync<OllamaBatchEmbedResponse>(
@@ -107,22 +108,9 @@ public sealed class OllamaEmbeddingProvider : IEmbeddingProvider
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogWarning(ex, "Ollama embedding HTTP transport error occurred.");
+            _logger.LogSafeFailure(ex, "EmbeddingTransportFailure", "OllamaEmbedding");
             throw new EmbeddingProviderUnavailableException(Name, "Network transport error communicating with local Ollama service.", ex);
         }
-    }
-
-    private static string SanitizeErrorMessage(string? errorBody)
-    {
-        if (string.IsNullOrWhiteSpace(errorBody))
-            return "No response body.";
-
-        var clean = errorBody.Trim();
-        if (clean.Length > 200)
-        {
-            clean = clean[..200] + "...";
-        }
-        return clean;
     }
 
     // --- Ollama DTOs ---

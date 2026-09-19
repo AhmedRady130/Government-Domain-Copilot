@@ -5,6 +5,8 @@ using GovernmentDomainCopilot.Application.Agents.Models;
 using GovernmentDomainCopilot.Application.Answering.Abstractions;
 using GovernmentDomainCopilot.Application.Answering.Models;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
+using System.Text.Json;
 using Xunit;
 
 namespace Application.Tests.Agents;
@@ -85,6 +87,68 @@ public sealed class AgentContractTests
         Assert.Equal(0, fakeApprovalTool.ExecutionCount);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task LookupAgents_DoNotEmitRawQueriesOrEvidenceInLogsOrDiagnostics(bool eligibility)
+    {
+        const string sensitiveQuery = "Applicant SSN 123-45-6789 and api-key=not-a-real-secret";
+        const string sensitiveEvidence = "Retrieved evidence containing account number 987654321";
+        var logger = new CollectingLogger();
+        IAgent agent = eligibility
+            ? new EligibilityIdentifierAgent(logger)
+            : new ProcedureResolverAgent(logger);
+        var toolName = eligibility ? "eligibility_lookup" : "procedure_lookup";
+        var tool = new FakeTool(toolName, isSideEffecting: false, outputJson: sensitiveEvidence);
+        var context = new AgentContext(Guid.NewGuid(), "run-1", "corr-1", sensitiveQuery);
+
+        var result = await agent.ExecuteAsync(
+            context,
+            new Dictionary<string, IAgentTool> { [toolName] = tool },
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain(sensitiveQuery, logger.Messages);
+        Assert.DoesNotContain(sensitiveEvidence, logger.Messages);
+        Assert.DoesNotContain(sensitiveQuery, result.Output);
+        Assert.DoesNotContain(sensitiveEvidence, result.Output);
+        var call = Assert.Single(result.ToolCalls);
+        Assert.DoesNotContain(sensitiveQuery, call.InputJson);
+        Assert.DoesNotContain(sensitiveEvidence, call.OutputJson);
+        Assert.Contains("Length", call.InputJson);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task LookupAgent_ToolFailureContainingSensitiveData_IsSanitizedBeforeDiagnosticsCanPersist(bool eligibility)
+    {
+        const string sensitiveQuery = "Applicant SSN 123-45-6789";
+        const string sensitiveCredential = "api-key=not-a-real-secret";
+        var logger = new CollectingLogger();
+        IAgent agent = eligibility
+            ? new EligibilityIdentifierAgent(logger)
+            : new ProcedureResolverAgent(logger);
+        var toolName = eligibility ? "eligibility_lookup" : "procedure_lookup";
+        var context = new AgentContext(Guid.NewGuid(), "run-1", "corr-1", sensitiveQuery);
+
+        var result = await agent.ExecuteAsync(
+            context,
+            new Dictionary<string, IAgentTool> { [toolName] = new ThrowingTool(toolName, sensitiveCredential) },
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(ToolFailureCodes.ExecutionFailed, result.ErrorMessage);
+        var call = Assert.Single(result.ToolCalls);
+        Assert.Equal(ToolFailureCodes.ExecutionFailed, call.ErrorMessage);
+
+        var persistedDiagnostics = JsonSerializer.Serialize(result);
+        Assert.DoesNotContain(sensitiveQuery, persistedDiagnostics);
+        Assert.DoesNotContain(sensitiveCredential, persistedDiagnostics);
+        Assert.DoesNotContain(sensitiveQuery, logger.Messages);
+        Assert.DoesNotContain(sensitiveCredential, logger.Messages);
+    }
+
     private sealed class FakeGroundedAnswerUseCase : IGroundedAnswerUseCase
     {
         private readonly GroundedAnswerResponse _response;
@@ -107,16 +171,46 @@ public sealed class AgentContractTests
         public bool IsSideEffecting { get; }
         public int ExecutionCount { get; private set; }
 
-        public FakeTool(string name, bool isSideEffecting)
+        private readonly string _outputJson;
+
+        public FakeTool(string name, bool isSideEffecting, string outputJson = "{}")
         {
             Name = name;
             IsSideEffecting = isSideEffecting;
+            _outputJson = outputJson;
         }
 
         public Task<ToolExecutionResult> ExecuteAsync(AgentContext context, string inputJson, CancellationToken cancellationToken)
         {
             ExecutionCount++;
-            return Task.FromResult(new ToolExecutionResult(true, "{}"));
+            return Task.FromResult(new ToolExecutionResult(true, _outputJson));
         }
+    }
+
+    private sealed class CollectingLogger : ILogger<EligibilityIdentifierAgent>, ILogger<ProcedureResolverAgent>
+    {
+        private readonly List<string> _messages = new();
+        public string Messages => string.Join("\n", _messages);
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => _messages.Add(formatter(state, exception));
+    }
+
+    private sealed class ThrowingTool : IAgentTool
+    {
+        private readonly string _sensitiveCredential;
+        public string Name { get; }
+        public string Description => "Test tool";
+        public bool IsSideEffecting => false;
+
+        public ThrowingTool(string name, string sensitiveCredential)
+        {
+            Name = name;
+            _sensitiveCredential = sensitiveCredential;
+        }
+
+        public Task<ToolExecutionResult> ExecuteAsync(AgentContext context, string inputJson, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException($"upstream failure for {context.UserQuery}; {_sensitiveCredential}");
     }
 }

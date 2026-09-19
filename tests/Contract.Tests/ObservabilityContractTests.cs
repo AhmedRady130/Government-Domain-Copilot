@@ -29,14 +29,14 @@ namespace Contract.Tests;
 /// Contract tests for FR-9: correlation ID propagation through the HTTP layer
 /// and LLM trace endpoint access control.
 /// </summary>
-public sealed class ObservabilityContractTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class ObservabilityContractTests : IClassFixture<ContractWebApplicationFactory>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
     // Shared InMemoryLlmTraceStore so we can inspect persisted traces from tests
     private readonly InMemoryLlmTraceStore _traceStore = new();
 
-    public ObservabilityContractTests(WebApplicationFactory<Program> factory)
+    public ObservabilityContractTests(ContractWebApplicationFactory factory)
     {
         var dbName = Guid.NewGuid().ToString();
         _factory = factory.WithWebHostBuilder(builder =>
@@ -111,6 +111,37 @@ public sealed class ObservabilityContractTests : IClassFixture<WebApplicationFac
         var echoedId = response.Headers.GetValues(CorrelationIdMiddleware.ResponseHeaderName).First();
         Assert.False(string.IsNullOrWhiteSpace(echoedId));
         Assert.StartsWith("corr-", echoedId);
+    }
+
+    [Fact]
+    public async Task HealthResponse_ContainsBaselineSecurityHeaders()
+    {
+        var client = CreateOfficerClient();
+        client.BaseAddress = new Uri("https://localhost");
+
+        var response = await client.GetAsync("/health");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'", response.Headers.GetValues("Content-Security-Policy").Single());
+        Assert.Equal("nosniff", response.Headers.GetValues("X-Content-Type-Options").Single());
+        Assert.Equal("DENY", response.Headers.GetValues("X-Frame-Options").Single());
+        Assert.Equal("strict-origin-when-cross-origin", response.Headers.GetValues("Referrer-Policy").Single());
+        Assert.Equal("max-age=31536000; includeSubDomains", response.Headers.GetValues("Strict-Transport-Security").Single());
+    }
+
+    [Fact]
+    public async Task ConfiguredCorsOrigin_IsAllowedWithoutCredentials()
+    {
+        var client = CreateOfficerClient();
+        using var request = new HttpRequestMessage(HttpMethod.Options, "/api/search");
+        request.Headers.Add("Origin", "http://localhost:4200");
+        request.Headers.Add("Access-Control-Request-Method", "GET");
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal("http://localhost:4200", response.Headers.GetValues("Access-Control-Allow-Origin").Single());
+        Assert.False(response.Headers.Contains("Access-Control-Allow-Credentials"));
     }
 
     // ─── TRACE ENDPOINT — ACCESS CONTROL ────────────────────────────────────

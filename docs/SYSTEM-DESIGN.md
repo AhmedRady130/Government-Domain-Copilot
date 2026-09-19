@@ -125,7 +125,7 @@ policy before provider invocation, creates a bounded evidence context, calls
 retrieved evidence. It returns a grounded response only when validation succeeds;
 otherwise it returns a refusal. The system prompt explicitly treats evidence as
 untrusted data and requires citation markers. ADR 0008 and
-[evaluation.md](evaluation.md) describe the policy and tests.
+[EVALUATION.md](EVALUATION.md) describe the policy and tests.
 
 ### D4 orchestration, approval, and streaming
 
@@ -191,17 +191,19 @@ explicitly invoked with `docker compose run --rm cli ...`. See
 
 | Capability | Target | MVP Status | Evidence | Gap / next step |
 |---|---|---|---|---|
-| D4 evidence-grounded response | Cited service guidance without fabricated facts. | **Fully implemented** for supported evidence/refusal flow. | `GroundedAnswerUseCase`, ADR 0008, [evaluation.md](evaluation.md). | Structural citation validation is not semantic/legal proof. |
+| D4 evidence-grounded response | Cited service guidance without fabricated facts. | **Fully implemented** for supported evidence/refusal flow. | `GroundedAnswerUseCase`, ADR 0008, [EVALUATION.md](EVALUATION.md). | Structural citation validation is not semantic/legal proof. |
 | T0 multi-tenancy | Trusted production identity and isolation across all tenant data. | **Partially implemented**: tenant-scoped design and two synthetic test tenants; production identity source deferred. | [SECURITY.md](SECURITY.md), tenant-scoped repositories/tests. | Integrate and operate a production identity provider/credential store. |
 | D4 orchestration | Governed service research and drafting workflow. | **Fully implemented foundation**. | [orchestration.md](orchestration.md), ADR 0009. | Agent knowledge remains grounded in the configured corpus; no external case-management integration. |
 | Approval authority | Human approval before consequential action. | **Fully implemented** staged approval boundary. | Approval endpoints, ADR 0009. | Real-world government action connectors are intentionally deferred. |
 | Streaming | Safe real-time progress, token delivery, and cancellation. | **Fully implemented**. | SSE endpoint, provider streaming, ADR 0010. | Clients must still treat partial chunks as unvalidated until terminal event. |
 | Corpus | Governed public/synthetic corpus at assessment scale. | **Fully implemented** for synthetic assessment data. | [CORPUS.md](CORPUS.md), corpus validator/manifest. | Live official source governance and refresh process are intentionally deferred. |
-| Evaluation | Reproducible quality/safety evaluation. | **Partially implemented**. | [evaluation.md](evaluation.md), golden dataset/tests. | Expand labeled corpus, adversarial coverage, and production monitoring thresholds. |
+| Evaluation | Reproducible quality/safety evaluation. | **Partially implemented**. | [EVALUATION.md](EVALUATION.md), golden dataset/tests. | Expand labeled corpus, adversarial coverage, and production monitoring thresholds. |
 | Observability/accountability | End-to-end safe auditability. | **Fully implemented foundation**. | [OBSERVABILITY.md](OBSERVABILITY.md), ADR 0011. | Pricing catalog and retention/operations policy need production governance. |
 | Provider portability | Hosted/local provider adapters with unchanged application workflow. | **Fully implemented** for Gemini/Ollama chat adapters. | DI selection, provider tests, swap acceptance test. | No bundled Ollama service/model or live-provider availability guarantee. |
 | Citizen portal | Public, accessible self-service experience. | **Not implemented**. | `src/Web` is excluded from assessment Compose stack. | Define and implement a governed public-channel experience. |
 | Production deployment governance | Production IAM, data governance, operations, and incident controls. | **Intentionally deferred**. | [SECURITY.md](SECURITY.md), [BRD.md](BRD.md). | Establish deployment architecture, identity, source governance, retention, and operations controls. |
+| GitHub Actions action pinning | Third-party actions pinned to verified commit SHAs. | **Deferred**. | `.github/dependabot.yml` monitors the `github-actions` ecosystem weekly. | Verify release SHAs and pin each action; effort: ~1 hour (estimate). |
+| Typed tenant-failure classification | Typed failure contract rather than exception-message inspection. | **Deferred to RLS PR**. | Current document endpoint preserves the existing message-based classifier. | Introduce and adopt a typed tenant-context exception with the RLS/data-layer changes. |
 
 ## 5. Data and request flow
 
@@ -304,6 +306,6 @@ The detailed rationale is intentionally maintained in the existing ADRs:
 | Gemini/Ollama chat adapters | `src/Infrastructure/LLM/Providers/`, `tests/Integration.Tests/Answering/` |
 | Authentication and tenancy | [SECURITY.md](SECURITY.md), `src/Infrastructure/Auth/`, `src/Infrastructure/Tenancy/` |
 | Corpus tooling and runtime | [CORPUS.md](CORPUS.md), `src/ClientCli/`, `data/corpus/`, `docker-compose.yml` |
-| Evaluation | [evaluation.md](evaluation.md), `src/EvaluationRunner/` |
+| Evaluation | [EVALUATION.md](EVALUATION.md), `src/EvaluationRunner/` |
 | Orchestration/approval/streaming | [orchestration.md](orchestration.md), ADRs 0009–0010 |
 | Observability | [OBSERVABILITY.md](OBSERVABILITY.md), ADR 0011 |

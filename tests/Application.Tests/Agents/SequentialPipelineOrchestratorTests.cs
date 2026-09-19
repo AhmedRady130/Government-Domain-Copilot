@@ -8,6 +8,7 @@ using GovernmentDomainCopilot.Application.Answering.Abstractions;
 using GovernmentDomainCopilot.Application.Answering.Models;
 using GovernmentDomainCopilot.Application.Retrieval.Abstractions;
 using GovernmentDomainCopilot.Application.Retrieval.Models;
+using GovernmentDomainCopilot.Application.Traces.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -17,6 +18,34 @@ namespace Application.Tests.Agents;
 public sealed class SequentialPipelineOrchestratorTests
 {
     private readonly Guid _tenantId = Guid.NewGuid();
+
+    [Fact]
+    public async Task OrchestrateAsync_LookupFailureWithSensitiveException_PersistsOnlySafeDiagnostics()
+    {
+        const string sensitiveQuery = "applicant SSN 123-45-6789";
+        const string sensitiveCredential = "api-key=not-a-real-secret";
+        var traceStore = new InMemoryRunTraceStore();
+        var groundedUseCase = new FakeGroundedAnswerUseCase(new GroundedAnswerResponse(
+            GroundedAnswerStatus.Refused, null, "Not used", Array.Empty<CitationItem>(), "P", "M", TimeSpan.Zero));
+        var orchestrator = new SequentialPipelineOrchestrator(
+            new IAgent[] { new EligibilityIdentifierAgent(NullLogger<EligibilityIdentifierAgent>.Instance) },
+            new IAgentTool[] { new ThrowingTool("eligibility_lookup", sensitiveCredential) },
+            groundedUseCase,
+            new FakeTenantContext(_tenantId),
+            Options.Create(new OrchestrationOptions { EnableFallback = false, MaxRetries = 0 }),
+            NullLogger<SequentialPipelineOrchestrator>.Instance,
+            traceStore);
+
+        var run = await orchestrator.OrchestrateAsync(sensitiveQuery);
+        var persistedRun = await traceStore.GetRunAsync(run.RunId, _tenantId);
+
+        Assert.NotNull(persistedRun);
+        Assert.Equal(ToolFailureCodes.ExecutionFailed, persistedRun.FailureReason);
+        Assert.Equal(ToolFailureCodes.ExecutionFailed, Assert.Single(persistedRun.AgentExecutions).ErrorMessage);
+        var persistedJson = System.Text.Json.JsonSerializer.Serialize(persistedRun);
+        Assert.DoesNotContain(sensitiveQuery, persistedJson);
+        Assert.DoesNotContain(sensitiveCredential, persistedJson);
+    }
 
     [Fact]
     public async Task OrchestrateAsync_SuccessfulPipeline_ExecutesAgentsInDeterministicSequence()
@@ -398,5 +427,26 @@ public sealed class SequentialPipelineOrchestratorTests
 
             return Task.FromResult(new AgentExecutionResult(Role, true, "Recovered successfully", Array.Empty<AgentToolCallRecord>(), TimeSpan.FromMilliseconds(5)));
         }
+    }
+
+    private sealed class ThrowingTool : IAgentTool
+    {
+        private readonly string _sensitiveCredential;
+
+        public ThrowingTool(string name, string sensitiveCredential)
+        {
+            Name = name;
+            _sensitiveCredential = sensitiveCredential;
+        }
+
+        public string Name { get; }
+        public string Description => "Test tool";
+        public bool IsSideEffecting => false;
+
+        public Task<ToolExecutionResult> ExecuteAsync(
+            AgentContext context,
+            string inputJson,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException($"upstream failure for {context.UserQuery}; {_sensitiveCredential}");
     }
 }

@@ -27,7 +27,9 @@ Gemini reads its API key only from the environment. Compose does not run Ollama.
 ### Document Ingestion Vertical Slice (MVP)
 
 - `POST /api/documents`: Ingests raw document text, normalises line endings/Unicode, deterministically chunks text, and persists `Document` and `DocumentChunk` entities atomically.
+- This is JSON text ingestion, not binary-file upload; request-body and source-text limits are enforced before chunking.
 - **Multi-Tenancy Guard**: Server-side tenant identity is resolved strictly via `ITenantContext` (headers/config in development, authenticated identity claims in production). Client-supplied request payloads cannot override tenant identity.
+- **Safe failure logging**: `src/Application/Observability/SafeExceptionLoggingExtensions.cs` logs bounded diagnostic metadata without exception text.
 
 ### Evaluation Harness (FR-3)
 
@@ -35,7 +37,7 @@ Gemini reads its API key only from the environment. Compose does not run Ollama.
 - **3 deterministic metrics**: Retrieval Hit Rate, Groundedness Score, Refusal Correctness.
 - **CLI runner**: `dotnet run --project src/EvaluationRunner` with `--dataset` and `--output` options.
 - **Per-case tenant isolation** via `AsyncLocal`-based `IEvaluationTenantContext`.
-- See [`docs/evaluation.md`](docs/evaluation.md) for full details.
+- See [`docs/EVALUATION.md`](docs/EVALUATION.md) for full details.
 
 ## 15-Minute Quick Start
 
@@ -235,7 +237,7 @@ With the stack started, a provider configured, and both tenants seeded:
 - [Architecture](docs/ARCHITECTURE.md)
 - [Security controls](docs/SECURITY.md)
 - [Synthetic corpus](docs/CORPUS.md)
-- [Evaluation harness](docs/evaluation.md)
+- [Evaluation harness](docs/EVALUATION.md)
 - [Orchestration and approval](docs/orchestration.md)
 - [Observability](docs/OBSERVABILITY.md)
 - [Architecture decision records](docs/adr/)

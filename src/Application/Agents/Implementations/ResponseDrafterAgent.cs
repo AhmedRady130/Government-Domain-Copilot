@@ -78,12 +78,22 @@ public sealed class ResponseDrafterAgent : IAgent
             });
 
             var toolStopwatch = Stopwatch.StartNew();
-            var toolResult = await tool.ExecuteAsync(context, toolInput, cancellationToken);
+            ToolExecutionResult toolResult;
+            try
+            {
+                toolResult = await tool.ExecuteAsync(context, toolInput, cancellationToken);
+            }
+            catch (Exception)
+            {
+                toolResult = new ToolExecutionResult(false, "{}", ToolFailureCodes.ExecutionFailed);
+            }
             toolStopwatch.Stop();
+
+            var safeErrorCode = toolResult.Success ? null : ToolFailureCodes.Sanitize(toolResult.ErrorMessage);
 
             toolCalls.Add(new AgentToolCallRecord(
                 tool.Name, toolInput, toolResult.OutputJson,
-                toolResult.Success, toolStopwatch.Elapsed, toolResult.ErrorMessage));
+                toolResult.Success, toolStopwatch.Elapsed, safeErrorCode));
 
             if (!toolResult.Success)
             {
@@ -91,7 +101,7 @@ public sealed class ResponseDrafterAgent : IAgent
                 return new AgentExecutionResult(
                     Role, false, "Failed to submit draft for human approval.",
                     toolCalls, stopwatch.Elapsed, TerminateEarly: true,
-                    ErrorMessage: toolResult.ErrorMessage);
+                    ErrorMessage: safeErrorCode);
             }
         }
         else

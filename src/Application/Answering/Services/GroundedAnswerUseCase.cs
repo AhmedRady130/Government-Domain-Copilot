@@ -208,11 +208,15 @@ public sealed class GroundedAnswerUseCase : IGroundedAnswerUseCase
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             llmStopwatch.Stop();
             var llmCompletedAt = DateTimeOffset.UtcNow;
-            _logger.LogError(ex, "Chat completion provider failure for tenant {TenantId}.", tenantId);
+            // Provider exceptions can contain prompts, retrieved content, or credentials.  Do not
+            // attach the exception to structured logging or durable observability records.
+            _logger.LogError("Chat completion provider failure for tenant {TenantId}. ErrorCode={ErrorCode}",
+                tenantId,
+                "LlmInvocationFailed");
 
             if (_llmTraceStore != null)
             {
@@ -232,15 +236,15 @@ public sealed class GroundedAnswerUseCase : IGroundedAnswerUseCase
                     CompletionTokens: null,
                     TotalTokens: null,
                     EstimatedCost: null,
-                    ErrorMessage: SanitizeErrorMessage(ex.Message));
+                    ErrorMessage: "LlmInvocationFailed");
 
                 try
                 {
                     await _llmTraceStore.RecordTraceAsync(failedTrace, CancellationToken.None);
                 }
-                catch (Exception traceEx)
+                catch (Exception)
                 {
-                    _logger.LogWarning(traceEx, "Failed to persist error trace for failed LLM call.");
+                    _logger.LogWarning("Failed to persist error trace for failed LLM call.");
                 }
             }
 
@@ -289,13 +293,4 @@ public sealed class GroundedAnswerUseCase : IGroundedAnswerUseCase
             Duration: stopwatch.Elapsed);
     }
 
-    private static string SanitizeErrorMessage(string? error)
-    {
-        if (string.IsNullOrWhiteSpace(error)) return "Unknown error";
-        var clean = System.Text.RegularExpressions.Regex.Replace(
-            error,
-            @"(?i)(bearer\s+[a-z0-9_\-\.]+|x-goog-api-key[=:\s]+[a-z0-9_\-]+|api[_-]?key[=:\s]+[a-z0-9_\-]+)",
-            "[REDACTED]");
-        return clean.Length > 2000 ? clean[..2000] : clean;
-    }
 }

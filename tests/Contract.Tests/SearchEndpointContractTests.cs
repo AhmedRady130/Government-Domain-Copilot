@@ -14,11 +14,11 @@ using Xunit;
 
 namespace Contract.Tests;
 
-public sealed class SearchEndpointContractTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class SearchEndpointContractTests : IClassFixture<ContractWebApplicationFactory>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public SearchEndpointContractTests(WebApplicationFactory<Program> factory)
+    public SearchEndpointContractTests(ContractWebApplicationFactory factory)
     {
         var dbName = Guid.NewGuid().ToString();
         _factory = factory.WithWebHostBuilder(builder =>

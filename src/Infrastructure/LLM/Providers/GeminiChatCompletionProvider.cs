@@ -1,5 +1,7 @@
 namespace GovernmentDomainCopilot.Infrastructure.LLM.Providers;
 
+using GovernmentDomainCopilot.Application.Observability;
+
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
@@ -104,12 +106,11 @@ public sealed class GeminiChatCompletionProvider : IChatCompletionProvider
 
             if (!response.IsSuccessStatusCode)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogWarning("Gemini completion request failed with HTTP {StatusCode}.", response.StatusCode);
 
                 throw new LlmProviderUnavailableException(
                     Name,
-                    $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}. Details: {SanitizeErrorMessage(errorBody)}");
+                    $"HTTP {(int)response.StatusCode}.");
             }
 
             var responseData = await response.Content.ReadFromJsonAsync<GeminiGenerateContentResponse>(
@@ -144,7 +145,7 @@ public sealed class GeminiChatCompletionProvider : IChatCompletionProvider
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogWarning(ex, "Gemini completion HTTP transport error occurred.");
+            _logger.LogSafeFailure(ex, "LlmTransportFailure", "GeminiChatCompletion", request.CorrelationId);
             throw new LlmProviderUnavailableException(Name, "Network transport error communicating with Gemini API.", ex);
         }
     }
@@ -209,7 +210,7 @@ public sealed class GeminiChatCompletionProvider : IChatCompletionProvider
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogWarning(ex, "Gemini stream completion HTTP transport error occurred.");
+            _logger.LogSafeFailure(ex, "LlmTransportFailure", "GeminiChatStream", request.CorrelationId);
             throw new LlmProviderUnavailableException(Name, "Network transport error communicating with Gemini API.", ex);
         }
 
@@ -222,12 +223,11 @@ public sealed class GeminiChatCompletionProvider : IChatCompletionProvider
 
             if (!response.IsSuccessStatusCode)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogWarning("Gemini stream completion request failed with HTTP {StatusCode}.", response.StatusCode);
 
                 throw new LlmProviderUnavailableException(
                     Name,
-                    $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}. Details: {SanitizeErrorMessage(errorBody)}");
+                    $"HTTP {(int)response.StatusCode}.");
             }
 
             using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -276,19 +276,6 @@ public sealed class GeminiChatCompletionProvider : IChatCompletionProvider
                 }
             }
         }
-    }
-
-    private static string SanitizeErrorMessage(string? errorBody)
-    {
-        if (string.IsNullOrWhiteSpace(errorBody))
-            return "No response body.";
-
-        var clean = errorBody.Trim();
-        if (clean.Length > 200)
-        {
-            clean = clean[..200] + "...";
-        }
-        return clean;
     }
 
     // --- Gemini Chat DTOs ---

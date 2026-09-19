@@ -12,7 +12,7 @@ invent rules, procedures, eligibility outcomes, fees, or deadlines.
 The assessment domain is **D4 — Government: citizen services and regulations**.
 This document separates target requirements from the implemented MVP. Detailed
 controls are in [SECURITY.md](SECURITY.md), [CORPUS.md](CORPUS.md),
-[evaluation.md](evaluation.md), [orchestration.md](orchestration.md),
+[EVALUATION.md](EVALUATION.md), [orchestration.md](orchestration.md),
 [OBSERVABILITY.md](OBSERVABILITY.md), and [ADRs](adr/).
 
 ## Goals
@@ -89,8 +89,8 @@ credentials remain server-side configuration.
 | ID | Requirement | Implemented MVP status |
 |---|---|---|
 | FR-1 | Maintain at least 30 documents and 150+ pages of public/synthetic data, with no real personal data. | Implemented: 32 synthetic documents, 160 explicit pages, 16 per synthetic tenant; manifest validation and authenticated, idempotent seeding. See [CORPUS.md](CORPUS.md). |
-| FR-2 | Answer government-service questions from retrieved evidence, with citations, and refuse when evidence is insufficient. | Implemented: grounded-answer use case, citation validation, sufficiency checks, and typed refusal. See [evaluation.md](evaluation.md) and ADR 0008. |
-| FR-3 | Evaluate retrieval/answer quality reproducibly. | Implemented: golden dataset and deterministic retrieval hit rate, groundedness, and refusal-correctness measures. See [evaluation.md](evaluation.md). |
+| FR-2 | Answer government-service questions from retrieved evidence, with citations, and refuse when evidence is insufficient. | Implemented: grounded-answer use case, citation validation, sufficiency checks, and typed refusal. See [EVALUATION.md](EVALUATION.md) and ADR 0008. |
+| FR-3 | Evaluate retrieval/answer quality reproducibly. | Implemented: golden dataset and deterministic retrieval hit rate, groundedness, and refusal-correctness measures. See [EVALUATION.md](EVALUATION.md). |
 | FR-4 | Orchestrate bounded specialized steps for government research and drafting. | Implemented foundation: document search, eligibility lookup, procedure lookup, response drafting, bounded execution, and fallback. See [orchestration.md](orchestration.md). |
 | FR-5 | Require human approval before a staged consequential action can execute. | Implemented: pending approvals and supervisor-only decision/execution controls. |
 | FR-8 | Authenticate users, enforce RBAC, and resolve tenant identity server-side. | Implemented for development/test/CI synthetic identities and protected API endpoints. Production identity integration remains a deployment dependency. |

@@ -19,11 +19,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
-public sealed class OrchestrationStreamingEndpointContractTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class OrchestrationStreamingEndpointContractTests : IClassFixture<ContractWebApplicationFactory>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public OrchestrationStreamingEndpointContractTests(WebApplicationFactory<Program> factory)
+    public OrchestrationStreamingEndpointContractTests(ContractWebApplicationFactory factory)
     {
         var dbName = Guid.NewGuid().ToString();
         _factory = factory.WithWebHostBuilder(builder =>

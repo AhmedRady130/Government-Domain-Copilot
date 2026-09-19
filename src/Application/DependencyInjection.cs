@@ -1,6 +1,7 @@
 using GovernmentDomainCopilot.Application.Answering.Abstractions;
 using GovernmentDomainCopilot.Application.Answering.Services;
 using GovernmentDomainCopilot.Application.Documents;
+using GovernmentDomainCopilot.Application.Documents.Security;
 using GovernmentDomainCopilot.Application.Embeddings;
 using GovernmentDomainCopilot.Application.Embeddings.Abstractions;
 using GovernmentDomainCopilot.Application.Retrieval;
@@ -15,6 +16,7 @@ public static class DependencyInjection
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         services.AddScoped<IIngestDocumentUseCase, IngestDocumentUseCase>();
+        services.AddSingleton<IPiiRedactor, RegexPiiRedactor>();
         services.AddScoped<IEmbeddingService, ResilientEmbeddingService>();
         services.AddScoped<IChunkEmbeddingService, ChunkEmbeddingService>();
         services.AddScoped<IVectorSearchUseCase, VectorSearchUseCase>();

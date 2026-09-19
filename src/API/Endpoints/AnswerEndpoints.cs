@@ -5,7 +5,11 @@ using GovernmentDomainCopilot.Application.Retrieval.Exceptions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using GovernmentDomainCopilot.API.Security;
+using GovernmentDomainCopilot.Application.Observability;
 
 namespace GovernmentDomainCopilot.API.Endpoints;
 
@@ -18,6 +22,7 @@ public static class AnswerEndpoints
             IGroundedAnswerUseCase useCase,
             GovernmentDomainCopilot.Application.Sessions.Abstractions.ISessionStore sessionStore,
             GovernmentDomainCopilot.Application.Abstractions.ITenantContext tenantContext,
+            IOptions<ApiSecurityOptions> securityOptions,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
@@ -31,6 +36,10 @@ public static class AnswerEndpoints
                     details = "Query is required in request body and cannot be empty."
                 });
             }
+
+            var validationFailure = QueryRequestValidator.Validate(request.Query, securityOptions.Value);
+            if (validationFailure is not null)
+                return validationFailure;
 
             var tenantId = tenantContext.GetTenantId();
 
@@ -87,7 +96,7 @@ public static class AnswerEndpoints
                     }
                     catch (Exception ex)
                     {
-                        logger.LogWarning(ex, "Failed to record session message for SessionId={SessionId}.", request.SessionId);
+                        logger.LogSafeFailure(ex, "SessionPersistenceFailed", "AppendAnswerSessionMessage");
                     }
                 }
 
@@ -105,17 +114,16 @@ public static class AnswerEndpoints
             }
             catch (VectorSearchValidationException ex)
             {
-                logger.LogWarning("Grounded answer validation failed: {Message}", ex.Message);
+                logger.LogSafeFailure(ex, "GroundedAnswerValidationFailed", "GroundedAnswerEndpoint");
 
                 return Results.BadRequest(new
                 {
-                    error = "Validation failed",
-                    details = ex.Message
+                    error = "ValidationFailed"
                 });
             }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("tenant", StringComparison.OrdinalIgnoreCase))
+            catch (InvalidOperationException ex) when (IsTenantContextFailure(ex))
             {
-                logger.LogWarning("Tenant context operation rejected during grounded answer: {Message}", ex.Message);
+                logger.LogSafeFailure(ex, "TenantContextRejected", "GroundedAnswerEndpoint");
 
                 return Results.Problem(
                     statusCode: StatusCodes.Status403Forbidden,
@@ -124,7 +132,7 @@ public static class AnswerEndpoints
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Unexpected error occurred during grounded answer generation.");
+                logger.LogSafeFailure(ex, "GroundedAnswerFailed", "GroundedAnswerEndpoint");
 
                 return Results.Problem(
                     statusCode: StatusCodes.Status500InternalServerError,
@@ -137,6 +145,7 @@ public static class AnswerEndpoints
         .WithSummary("Generate grounded government domain answer")
         .WithDescription("Produces an evidence-grounded answer with citations or typed refusal for the user query.")
         .RequireAuthorization()
+        .RequireRateLimiting(ApiRateLimitPolicies.AiWorkload)
         .Produces<GroundedAnswerApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
@@ -146,4 +155,7 @@ public static class AnswerEndpoints
 
         return endpoints;
     }
+
+    private static bool IsTenantContextFailure(InvalidOperationException exception) =>
+        exception.Message.Contains("tenant", StringComparison.OrdinalIgnoreCase);
 }

@@ -104,7 +104,7 @@ Editable diagram: [Trust-boundary diagram](architecture/trust-boundaries.mmd).
 | Application → LLM provider | System instruction, user question, bounded evidence context, model/generation settings, and Gemini API credential when Gemini is selected. | The LLM can see that generation payload only. It cannot directly access PostgreSQL, the full corpus, API endpoints, session/approval stores, authenticated tenant-control context, or approval authority. It may infer information only from the supplied text. |
 | Configuration → runtime | Database connection string, provider choice/base URL, model/limits, and Gemini credential. | Configuration is server-side. `GEMINI_API_KEY` is environment supplied; Ollama has no API key. No client endpoint supplies an LLM provider URL. |
 | Approval boundary | A staged draft and supervisor decision. | A model or officer cannot execute a pending/rejected action. `SupervisorOnly` protects decision/execution; the MVP has no real-world government-system connector. |
-| Observability boundary | Correlation/run/provider/timing/status and available usage metadata. | Persisted traces exclude secrets, authorization headers, system prompts, raw chunks, and partial stream output; errors are sanitized. |
+| Observability boundary | Correlation/run/provider/timing/status and available usage metadata. | Persisted traces exclude secrets, authorization headers, system prompts, raw chunks, and partial stream output; `Application/Observability/SafeExceptionLoggingExtensions.cs` records only safe failure metadata. |
 
 The detailed threat model, synthetic-identity boundary, and endpoint matrix are
 authoritative in [SECURITY.md](SECURITY.md). Grounding and prompt-injection

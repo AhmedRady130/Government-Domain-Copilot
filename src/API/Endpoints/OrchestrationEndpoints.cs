@@ -9,7 +9,11 @@ using GovernmentDomainCopilot.Application.Streaming.Models;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using GovernmentDomainCopilot.API.Security;
+using GovernmentDomainCopilot.Application.Observability;
 
 public static class OrchestrationEndpoints
 {
@@ -19,6 +23,7 @@ public static class OrchestrationEndpoints
         endpoints.MapPost("/api/orchestrate", async (
             OrchestrationApiRequest? request,
             IMultiAgentOrchestrator orchestrator,
+            IOptions<ApiSecurityOptions> securityOptions,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
@@ -32,6 +37,10 @@ public static class OrchestrationEndpoints
                     details = "Query is required in request body and cannot be empty."
                 });
             }
+
+            var validationFailure = QueryRequestValidator.Validate(request.Query, securityOptions.Value);
+            if (validationFailure is not null)
+                return validationFailure;
 
             try
             {
@@ -97,16 +106,16 @@ public static class OrchestrationEndpoints
             }
             catch (KeyNotFoundException ex)
             {
-                logger.LogWarning("Orchestration session lookup failed: {Message}", ex.Message);
+                logger.LogSafeFailure(ex, "OrchestrationSessionNotFound", "OrchestrationEndpoint");
                 return Results.NotFound(new
                 {
                     error = "Not found",
-                    details = ex.Message
+                    details = "The requested session was not found for the authenticated tenant."
                 });
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Unexpected error occurred during multi-agent orchestration.");
+                logger.LogSafeFailure(ex, "OrchestrationFailed", "OrchestrationEndpoint");
                 return Results.Problem(
                     statusCode: StatusCodes.Status500InternalServerError,
                     title: "Internal Server Error",
@@ -117,6 +126,7 @@ public static class OrchestrationEndpoints
         .WithTags("Orchestration")
         .WithSummary("Run multi-agent orchestration pipeline")
         .RequireAuthorization()
+        .RequireRateLimiting(ApiRateLimitPolicies.AiWorkload)
         .Produces<OrchestrationApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
@@ -223,12 +233,12 @@ public static class OrchestrationEndpoints
                     details = $"Approval request '{requestId}' was not found for the authenticated tenant."
                 });
             }
-            catch (InvalidOperationException ex)
+            catch (InvalidOperationException)
             {
                 return Results.BadRequest(new
                 {
-                    error = "Invalid state transition",
-                    details = ex.Message
+                    error = "InvalidStateTransition",
+                    details = "The approval request cannot transition from its current state."
                 });
             }
         })
@@ -269,12 +279,12 @@ public static class OrchestrationEndpoints
                     details = $"Approval request '{requestId}' was not found for the authenticated tenant."
                 });
             }
-            catch (InvalidOperationException ex)
+            catch (InvalidOperationException)
             {
                 return Results.BadRequest(new
                 {
-                    error = "Execution blocked",
-                    details = ex.Message
+                    error = "ExecutionBlocked",
+                    details = "The approval request is not eligible for execution."
                 });
             }
         })
@@ -321,7 +331,9 @@ public static class OrchestrationEndpoints
         endpoints.MapPost("/api/orchestrate/stream", async (
             OrchestrationApiRequest? request,
             IStreamingOrchestrator streamingOrchestrator,
+            HttpContext httpContext,
             HttpResponse httpResponse,
+            IOptions<ApiSecurityOptions> securityOptions,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
@@ -333,6 +345,14 @@ public static class OrchestrationEndpoints
                     error = "Validation failed",
                     details = "Query is required in request body and cannot be empty."
                 }, cancellationToken);
+                return;
+            }
+
+            var validationFailure = QueryRequestValidator.Validate(request.Query, securityOptions.Value);
+            if (validationFailure is not null)
+            {
+                httpResponse.StatusCode = StatusCodes.Status400BadRequest;
+                await validationFailure.ExecuteAsync(httpContext);
                 return;
             }
 
@@ -361,9 +381,9 @@ public static class OrchestrationEndpoints
             }
             catch (KeyNotFoundException ex)
             {
-                logger.LogWarning("Streaming orchestration session lookup failed: {Message}", ex.Message);
+                logger.LogSafeFailure(ex, "OrchestrationSessionNotFound", "StreamingOrchestrationEndpoint");
                 httpResponse.StatusCode = StatusCodes.Status404NotFound;
-                await httpResponse.WriteAsJsonAsync(new { error = "Not found", details = ex.Message }, cancellationToken);
+                await httpResponse.WriteAsJsonAsync(new { error = "NotFound" }, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -371,7 +391,7 @@ public static class OrchestrationEndpoints
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Unexpected error during streaming orchestration SSE.");
+                logger.LogSafeFailure(ex, "StreamingOrchestrationFailed", "StreamingOrchestrationEndpoint");
                 try
                 {
                     var errData = System.Text.Json.JsonSerializer.Serialize(new
@@ -389,6 +409,7 @@ public static class OrchestrationEndpoints
         })
         .WithName("StreamingOrchestrate")
         .RequireAuthorization()
+        .RequireRateLimiting(ApiRateLimitPolicies.AiWorkload)
         .Produces(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)

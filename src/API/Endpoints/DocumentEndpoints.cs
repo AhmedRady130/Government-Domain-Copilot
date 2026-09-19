@@ -2,11 +2,13 @@ using GovernmentDomainCopilot.API.Models;
 using GovernmentDomainCopilot.Application.Documents;
 using GovernmentDomainCopilot.Application.Documents.Commands;
 using GovernmentDomainCopilot.Application.Documents.Validation;
+using GovernmentDomainCopilot.Application.Documents.Security;
 using GovernmentDomainCopilot.Domain.Entities;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
+using GovernmentDomainCopilot.Application.Observability;
 
 namespace GovernmentDomainCopilot.API.Endpoints;
 
@@ -17,6 +19,7 @@ public static class DocumentEndpoints
         endpoints.MapPost("/api/documents", async (
             IngestDocumentApiRequest? request,
             IIngestDocumentUseCase useCase,
+            IPiiRedactor piiRedactor,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
@@ -31,10 +34,20 @@ public static class DocumentEndpoints
                 });
             }
 
+            var piiResult = piiRedactor.Redact(request.SourceText);
+            if (piiResult.HasPii)
+            {
+                logger.LogInformation(
+                    "Document ingestion redacted PII. EmailCount={EmailCount} PhoneNumberCount={PhoneNumberCount} NationalIdCount={NationalIdCount}",
+                    piiResult.EmailCount,
+                    piiResult.PhoneNumberCount,
+                    piiResult.NationalIdCount);
+            }
+
             var command = new IngestDocumentCommand(
                 request.Title ?? string.Empty,
                 request.SourceReference ?? string.Empty,
-                request.SourceText ?? string.Empty);
+                piiResult.RedactedText);
 
             try
             {
@@ -69,7 +82,7 @@ public static class DocumentEndpoints
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("tenant", StringComparison.OrdinalIgnoreCase))
             {
-                logger.LogWarning("Tenant context operation rejected: {Message}", ex.Message);
+                logger.LogSafeFailure(ex, "TenantContextRejected", "DocumentIngestionEndpoint");
 
                 return Results.Problem(
                     statusCode: StatusCodes.Status403Forbidden,
@@ -78,7 +91,7 @@ public static class DocumentEndpoints
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Unexpected error occurred during document ingestion.");
+                logger.LogSafeFailure(ex, "DocumentIngestionFailed", "DocumentIngestionEndpoint");
 
                 return Results.Problem(
                     statusCode: StatusCodes.Status500InternalServerError,

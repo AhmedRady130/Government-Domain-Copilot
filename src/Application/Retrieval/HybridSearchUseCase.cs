@@ -6,6 +6,7 @@ using GovernmentDomainCopilot.Application.Retrieval.Abstractions;
 using GovernmentDomainCopilot.Application.Retrieval.Exceptions;
 using GovernmentDomainCopilot.Application.Retrieval.Models;
 using GovernmentDomainCopilot.Application.Retrieval.Services;
+using GovernmentDomainCopilot.Application.Observability;
 using Microsoft.Extensions.Logging;
 
 public sealed class HybridSearchUseCase : IHybridSearchUseCase
@@ -83,7 +84,7 @@ public sealed class HybridSearchUseCase : IHybridSearchUseCase
         }
         catch (Exception ex) when (ex is not VectorSearchValidationException)
         {
-            _logger.LogWarning(ex, "Vector search branch failed for tenant {TenantId}. Degrading gracefully to keyword retrieval.", tenantId);
+            _logger.LogSafeFailure(ex, "HybridVectorBranchFailed", "HybridSearchVectorBranch", duration: stopwatch.Elapsed);
         }
 
         try
@@ -93,7 +94,7 @@ public sealed class HybridSearchUseCase : IHybridSearchUseCase
         }
         catch (Exception ex) when (ex is not VectorSearchValidationException)
         {
-            _logger.LogWarning(ex, "Keyword search branch failed for tenant {TenantId}. Degrading gracefully to vector retrieval.", tenantId);
+            _logger.LogSafeFailure(ex, "HybridKeywordBranchFailed", "HybridSearchKeywordBranch", duration: stopwatch.Elapsed);
         }
 
         if (!vectorSuccess && !keywordSuccess)
