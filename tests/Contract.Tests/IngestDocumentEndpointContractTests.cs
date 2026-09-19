@@ -12,11 +12,11 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Contract.Tests;
 
-public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class IngestDocumentEndpointContractTests : IClassFixture<ContractWebApplicationFactory>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public IngestDocumentEndpointContractTests(WebApplicationFactory<Program> factory)
+    public IngestDocumentEndpointContractTests(ContractWebApplicationFactory factory)
     {
         var dbName = Guid.NewGuid().ToString();
         _factory = factory.WithWebHostBuilder(builder =>
@@ -85,6 +85,37 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
     }
 
     [Fact]
+    public async Task Ingest_document_with_pii_persists_only_redacted_content()
+    {
+        var client = CreateOfficerClient();
+        const string email = "citizen@example.test";
+        const string phone = "+20 10 1234 5678";
+        const string nationalId = "29801011234567";
+        var payload = new IngestDocumentApiRequest("PII Test", "gov-ref-pii", $"Contact {email}; phone {phone}; national ID {nationalId}.");
+
+        var response = await client.PostAsJsonAsync("/api/documents", payload);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<IngestDocumentApiResponse>();
+        Assert.NotNull(result);
+
+        using var scope = _factory.Services.CreateScope();
+        var repository = scope.ServiceProvider.GetRequiredService<IDocumentRepository>();
+        var chunks = await repository.GetChunksByDocumentIdAsync(
+            GovernmentDomainCopilot.Infrastructure.Tenancy.DevelopmentTenantContext.DefaultDevelopmentTenantId,
+            result.DocumentId,
+            CancellationToken.None);
+        var persistedContent = string.Join("\n", chunks.Select(c => c.Content));
+
+        Assert.Contains("[REDACTED:EMAIL]", persistedContent);
+        Assert.Contains("[REDACTED:PHONE]", persistedContent);
+        Assert.Contains("[REDACTED:NATIONAL_ID]", persistedContent);
+        Assert.DoesNotContain(email, persistedContent);
+        Assert.DoesNotContain(phone, persistedContent);
+        Assert.DoesNotContain(nationalId, persistedContent);
+    }
+
+    [Fact]
     public async Task Ingest_missing_title_returns_400_BadRequest()
     {
         var client = CreateOfficerClient();
@@ -146,6 +177,58 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
         var response = await client.PostAsJsonAsync("/api/documents", payload);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Ingest_disallowed_file_type_is_rejected_without_processing_a_filename()
+    {
+        var client = CreateOfficerClient();
+        using var content = CreateFileUpload("malware.exe", "application/octet-stream", "not an executable");
+
+        var response = await client.PostAsync("/api/documents", content);
+
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+        Assert.Contains("UnsupportedDocumentMediaType", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Ingest_extension_and_content_type_mismatch_is_rejected_without_parsing_file_content()
+    {
+        var client = CreateOfficerClient();
+        using var content = CreateFileUpload("document.txt", "image/png", "not a PNG signature");
+
+        var response = await client.PostAsync("/api/documents", content);
+
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+        Assert.Contains("UnsupportedDocumentMediaType", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Ingest_path_traversal_filename_is_rejected_without_echoing_the_filename()
+    {
+        var client = CreateOfficerClient();
+        const string traversalFilename = "../../sensitive.txt";
+        using var content = CreateFileUpload(traversalFilename, "text/plain", "plain text");
+
+        var response = await client.PostAsync("/api/documents", content);
+        var responseBody = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+        Assert.DoesNotContain(traversalFilename, responseBody);
+        Assert.Contains("UnsupportedDocumentMediaType", responseBody);
+    }
+
+    [Fact]
+    public async Task Ingest_request_exceeding_server_body_limit_is_rejected_with_stable_error_code()
+    {
+        var client = CreateOfficerClient();
+        var oversizedJson = "{" + new string('A', 2_000_001) + "}";
+        using var content = new StringContent(oversizedJson, System.Text.Encoding.UTF8, "application/json");
+
+        var response = await client.PostAsync("/api/documents", content);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Contains("RequestBodyTooLarge", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -285,6 +368,14 @@ public sealed class IngestDocumentEndpointContractTests : IClassFixture<WebAppli
         {
             throw new InvalidOperationException("Failed to chunk document content due to syntax error.");
         }
+    }
+
+    private static MultipartFormDataContent CreateFileUpload(string fileName, string mediaType, string body)
+    {
+        var content = new MultipartFormDataContent();
+        var file = new StringContent(body, System.Text.Encoding.UTF8, mediaType);
+        content.Add(file, "file", fileName);
+        return content;
     }
 
     private sealed class StubChunkRetriever : GovernmentDomainCopilot.Application.Retrieval.Abstractions.IChunkRetriever

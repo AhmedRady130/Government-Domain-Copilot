@@ -20,11 +20,11 @@ using Xunit;
 
 namespace Contract.Tests;
 
-public sealed class RunAndSessionEndpointContractTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class RunAndSessionEndpointContractTests : IClassFixture<ContractWebApplicationFactory>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public RunAndSessionEndpointContractTests(WebApplicationFactory<Program> factory)
+    public RunAndSessionEndpointContractTests(ContractWebApplicationFactory factory)
     {
         var dbName = Guid.NewGuid().ToString();
         _factory = factory.WithWebHostBuilder(builder =>

@@ -1,5 +1,7 @@
 namespace GovernmentDomainCopilot.Infrastructure.LLM.Providers;
 
+using GovernmentDomainCopilot.Application.Observability;
+
 using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -67,7 +69,7 @@ public sealed class OllamaChatCompletionProvider : IChatCompletionProvider
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogWarning(ex, "Ollama completion HTTP transport error occurred.");
+            _logger.LogSafeFailure(ex, "LlmTransportFailure", "OllamaChatCompletion", request.CorrelationId);
             throw new LlmProviderUnavailableException(Name, "Network transport error communicating with local Ollama service.", ex);
         }
         catch (JsonException ex)
@@ -98,7 +100,7 @@ public sealed class OllamaChatCompletionProvider : IChatCompletionProvider
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogWarning(ex, "Ollama stream completion HTTP transport error occurred.");
+            _logger.LogSafeFailure(ex, "LlmTransportFailure", "OllamaChatStream", request.CorrelationId);
             throw new LlmProviderUnavailableException(Name, "Network transport error communicating with local Ollama service.", ex);
         }
 
@@ -165,7 +167,7 @@ public sealed class OllamaChatCompletionProvider : IChatCompletionProvider
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogWarning("Ollama completion request failed with HTTP {StatusCode}.", response.StatusCode);
-            throw new LlmProviderUnavailableException(Name, $"Ollama returned HTTP {(int)response.StatusCode} {response.ReasonPhrase}.");
+            throw new LlmProviderUnavailableException(Name, $"Ollama returned HTTP {(int)response.StatusCode}.");
         }
     }
 

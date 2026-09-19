@@ -21,11 +21,11 @@ namespace Contract.Tests;
 /// FR-8 contract tests: authentication enforcement, role-based access control,
 /// and claims-based tenant identity isolation.
 /// </summary>
-public sealed class AuthenticationAndRoleContractTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class AuthenticationAndRoleContractTests : IClassFixture<ContractWebApplicationFactory>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public AuthenticationAndRoleContractTests(WebApplicationFactory<Program> factory)
+    public AuthenticationAndRoleContractTests(ContractWebApplicationFactory factory)
     {
         var dbName = Guid.NewGuid().ToString();
         _factory = factory.WithWebHostBuilder(builder =>

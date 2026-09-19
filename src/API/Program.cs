@@ -1,12 +1,68 @@
 using GovernmentDomainCopilot.API.Endpoints;
 using GovernmentDomainCopilot.API.Middleware;
+using GovernmentDomainCopilot.API.Security;
 using GovernmentDomainCopilot.Application;
 using GovernmentDomainCopilot.Infrastructure;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var apiSecurityOptions = builder.Configuration
+    .GetSection(ApiSecurityOptions.SectionName)
+    .Get<ApiSecurityOptions>() ?? new ApiSecurityOptions();
+apiSecurityOptions.Validate();
+
+builder.WebHost.ConfigureKestrel(options =>
+    options.Limits.MaxRequestBodySize = apiSecurityOptions.MaxRequestBodyBytes);
+
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.Configure<ApiSecurityOptions>(builder.Configuration.GetSection(ApiSecurityOptions.SectionName));
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("ApiBrowserClients", policy =>
+    {
+        // No credentials are enabled. Production origins must be supplied through server configuration.
+        policy.WithOrigins(apiSecurityOptions.AllowedOrigins.ToArray())
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        var retryAfter = apiSecurityOptions.RateLimiting.RetryAfterFallbackSeconds;
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan metadata))
+            retryAfter = Math.Max(1, (int)Math.Ceiling(metadata.TotalSeconds));
+
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        context.HttpContext.Response.Headers.RetryAfter = retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        await context.HttpContext.Response.WriteAsJsonAsync(new { error = "RateLimitExceeded" }, cancellationToken);
+    };
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            GetPartitionKey(context),
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = apiSecurityOptions.RateLimiting.GlobalPermitLimit,
+                Window = TimeSpan.FromSeconds(apiSecurityOptions.RateLimiting.WindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+
+    options.AddPolicy(ApiRateLimitPolicies.AiWorkload, context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            GetPartitionKey(context),
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = apiSecurityOptions.RateLimiting.AiWorkloadPermitLimit,
+                Window = TimeSpan.FromSeconds(apiSecurityOptions.RateLimiting.WindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+});
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -63,9 +119,14 @@ app.UseExceptionHandler(errorApp =>
 // Correlation ID must be set before authentication so all downstream middleware
 // (including the auth handler) can read the correlation context.
 app.UseMiddleware<CorrelationIdMiddleware>();
+app.UseMiddleware<SecurityHeadersMiddleware>();
+app.UseMiddleware<RequestBodySizeLimitMiddleware>();
+app.UseMiddleware<DocumentIngestionContentTypeMiddleware>();
 
+app.UseCors("ApiBrowserClients");
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapGet("/health", () => Results.Ok(new { status = "Healthy" }))
     .AllowAnonymous()
@@ -104,5 +165,14 @@ app.MapSessionEndpoints();
 app.MapTraceEndpoints();
 
 app.Run();
+
+static string GetPartitionKey(HttpContext context)
+{
+    var tenantId = context.User.FindFirst("tenant_id")?.Value;
+    if (!string.IsNullOrWhiteSpace(tenantId))
+        return $"tenant:{tenantId}";
+
+    return $"ip:{context.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
+}
 
 public partial class Program { }

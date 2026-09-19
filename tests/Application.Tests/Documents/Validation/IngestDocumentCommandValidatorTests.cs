@@ -20,9 +20,9 @@ public sealed class IngestDocumentCommandValidatorTests
         string? sourceReference = null,
         string? sourceText = null)
         => new(
-            Title:           title           ?? "Valid Document Title",
+            Title: title ?? "Valid Document Title",
             SourceReference: sourceReference ?? "https://gov.example/doc/1",
-            SourceText:      sourceText      ?? "Valid source text for ingestion.");
+            SourceText: sourceText ?? "Valid source text for ingestion.");
 
     // =========================================================================
     // Happy path
@@ -184,9 +184,9 @@ public sealed class IngestDocumentCommandValidatorTests
     public void All_fields_empty_produces_three_errors_one_per_property()
     {
         var command = new IngestDocumentCommand(
-            Title:           "",
+            Title: "",
             SourceReference: "",
-            SourceText:      "");
+            SourceText: "");
 
         var errors = IngestDocumentCommandValidator.Validate(command);
 
@@ -199,12 +199,12 @@ public sealed class IngestDocumentCommandValidatorTests
     [Fact]
     public void Independent_field_violations_are_all_reported()
     {
-        var oversizedTitle     = new string('A', IngestionLimits.MaxTitleLength + 1);
+        var oversizedTitle = new string('A', IngestionLimits.MaxTitleLength + 1);
         var oversizedReference = new string('x', IngestionLimits.MaxSourceReferenceLength + 1);
         var command = new IngestDocumentCommand(
-            Title:           oversizedTitle,
+            Title: oversizedTitle,
             SourceReference: oversizedReference,
-            SourceText:      "Valid text.");
+            SourceText: "Valid text.");
 
         var errors = IngestDocumentCommandValidator.Validate(command);
 

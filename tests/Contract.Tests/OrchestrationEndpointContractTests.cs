@@ -13,16 +13,17 @@ using GovernmentDomainCopilot.Infrastructure.Auth;
 using GovernmentDomainCopilot.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Contract.Tests;
 
-public sealed class OrchestrationEndpointContractTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class OrchestrationEndpointContractTests : IClassFixture<ContractWebApplicationFactory>
 {
     private readonly WebApplicationFactory<Program> _factory;
 
-    public OrchestrationEndpointContractTests(WebApplicationFactory<Program> factory)
+    public OrchestrationEndpointContractTests(ContractWebApplicationFactory factory)
     {
         var dbName = Guid.NewGuid().ToString();
         _factory = factory.WithWebHostBuilder(builder =>
@@ -103,6 +104,24 @@ public sealed class OrchestrationEndpointContractTests : IClassFixture<WebApplic
         Assert.NotNull(result.CorrelationId);
         Assert.Equal("Sequential Pipeline with Human-in-the-Loop & Plain-RAG Fallback", result.PatternName);
         Assert.NotEmpty(result.AgentExecutions);
+    }
+
+    [Fact]
+    public async Task OrchestrateEndpoint_QueryOverServerSideLimit_ReturnsBadRequest()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, configuration) =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["ApiSecurity:MaxQueryLength"] = "8"
+                })));
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add(ApiKeyAuthenticationOptions.HeaderName, SeedAuthIdentities.TenantAOfficer.ApiKey);
+
+        var response = await client.PostAsJsonAsync("/api/orchestrate", new OrchestrationApiRequest("123456789"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("QueryTooLong", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 
     [Fact]

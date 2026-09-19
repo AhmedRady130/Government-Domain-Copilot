@@ -1,0 +1,4 @@
+# False positives: fake value in a unit test that simulated a Gemini 403 response.
+# Manually verified: not a real credential. History intentionally not rewritten.
+8b24accdbb1a254cd839ffc0d568b18cf3d25f1f:tests/Integration.Tests/Embeddings/GeminiEmbeddingProviderTests.cs:generic-api-key:120
+db8019ee187f33973f4ebc5303bbb3a38d9f99f5:tests/Integration.Tests/Embeddings/GeminiEmbeddingProviderTests.cs:generic-api-key:120

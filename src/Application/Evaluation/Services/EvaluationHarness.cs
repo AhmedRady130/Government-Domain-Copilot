@@ -6,6 +6,7 @@ using GovernmentDomainCopilot.Application.Answering.Abstractions;
 using GovernmentDomainCopilot.Application.Answering.Models;
 using GovernmentDomainCopilot.Application.Evaluation.Abstractions;
 using GovernmentDomainCopilot.Application.Evaluation.Models;
+using GovernmentDomainCopilot.Application.Observability;
 using Microsoft.Extensions.Logging;
 
 public sealed class EvaluationHarness : IEvaluationHarness
@@ -71,7 +72,7 @@ public sealed class EvaluationHarness : IEvaluationHarness
             catch (Exception ex)
             {
                 caseStopwatch.Stop();
-                _logger.LogWarning(ex, "Unexpected exception thrown while executing evaluation case '{CaseId}'.", c.Id);
+                _logger.LogSafeFailure(ex, "EvaluationCaseFailed", "EvaluationCase", duration: caseStopwatch.Elapsed);
 
                 var failedResult = new EvaluationCaseResult(
                     CaseId: c.Id,

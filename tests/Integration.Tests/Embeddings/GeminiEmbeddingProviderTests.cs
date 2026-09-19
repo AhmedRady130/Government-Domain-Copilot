@@ -117,7 +117,7 @@ public sealed class GeminiEmbeddingProviderTests
     [Fact]
     public async Task EmbedAsync_does_not_leak_secrets_in_exception_messages()
     {
-        var httpHandler = new FakeHttpMessageHandler(HttpStatusCode.Forbidden, "Invalid API key provided: secret_key_1234567890");
+        var httpHandler = new FakeHttpMessageHandler(HttpStatusCode.Forbidden, "Invalid API key provided: FAKE-TEST-VALUE");
         var httpClient = new HttpClient(httpHandler);
         var provider = new GeminiEmbeddingProvider(httpClient, Options.Create(_options), NullLogger<GeminiEmbeddingProvider>.Instance);
 
@@ -127,6 +127,7 @@ public sealed class GeminiEmbeddingProviderTests
             () => provider.EmbedAsync(request, CancellationToken.None));
 
         Assert.DoesNotContain("Authorization: Bearer", ex.Message);
+        Assert.DoesNotContain("FAKE-TEST-VALUE", ex.Message);
     }
 
     private sealed class FakeHttpMessageHandler(HttpStatusCode statusCode, string responseContent) : HttpMessageHandler

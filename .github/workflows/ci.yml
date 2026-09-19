@@ -12,13 +12,15 @@ jobs:
   dotnet:
     name: .NET Build and Test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@6bd8b7f7774af54e05809fcc5431931b3eb1ddee # v4.0.1
         with:
           dotnet-version: '9.0.x'
 
@@ -28,19 +30,35 @@ jobs:
       - name: Build
         run: dotnet build GovernmentDomainCopilot.sln --no-restore --configuration Release
 
-      - name: Test
-        run: dotnet test GovernmentDomainCopilot.sln --no-build --configuration Release
+      - name: Lint and format verification
+        run: dotnet format GovernmentDomainCopilot.sln --verify-no-changes --no-restore
+
+      # Run each assembly separately so Docker-backed PostgreSQL fixtures are not
+      # contended by the solution-level test runner.
+      - name: Test Domain
+        run: dotnet test tests/Domain.Tests/Domain.Tests.csproj --no-build --configuration Release
+
+      - name: Test Application
+        run: dotnet test tests/Application.Tests/Application.Tests.csproj --no-build --configuration Release
+
+      - name: Test Contract
+        run: dotnet test tests/Contract.Tests/Contract.Tests.csproj --no-build --configuration Release
+
+      - name: Test Integration
+        run: dotnet test tests/Integration.Tests/Integration.Tests.csproj --no-build --configuration Release
 
   angular:
     name: Angular Build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24.x'
           cache: 'npm'
@@ -53,7 +71,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: src/Web
-        run: npm install
+        run: npm ci
 
       - name: Build
         working-directory: src/Web

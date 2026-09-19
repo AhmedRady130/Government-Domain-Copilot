@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using GovernmentDomainCopilot.Application.Agents.Abstractions;
 using GovernmentDomainCopilot.Application.Agents.Models;
+using GovernmentDomainCopilot.Application.Observability;
 using Microsoft.Extensions.Logging;
 
 public sealed class EligibilityIdentifierAgent : IAgent
@@ -37,7 +38,12 @@ public sealed class EligibilityIdentifierAgent : IAgent
         var stopwatch = Stopwatch.StartNew();
         var toolCalls = new List<AgentToolCallRecord>();
 
-        _logger.LogInformation("Agent '{Role}' starting execution for query: {Query}", Role, context.UserQuery);
+        var queryMetadata = PromptDiagnosticMetadata.From(context.UserQuery);
+        _logger.LogInformation(
+            "Agent {Role} starting execution. QueryPresent={QueryPresent} QueryLength={QueryLength}",
+            Role,
+            queryMetadata.IsPresent,
+            queryMetadata.Length);
 
         // Security / Contract check: Only allowed tools can be invoked
         if (!availableTools.TryGetValue("eligibility_lookup", out var tool) || !AllowedToolNames.Contains(tool.Name))
@@ -50,19 +56,31 @@ public sealed class EligibilityIdentifierAgent : IAgent
 
         var toolInput = JsonSerializer.Serialize(new { topic = context.UserQuery });
         var toolStopwatch = Stopwatch.StartNew();
-        var toolResult = await tool.ExecuteAsync(context, toolInput, cancellationToken);
+        ToolExecutionResult toolResult;
+        try
+        {
+            toolResult = await tool.ExecuteAsync(context, toolInput, cancellationToken);
+        }
+        catch (Exception)
+        {
+            toolResult = new ToolExecutionResult(false, "{}", ToolFailureCodes.ExecutionFailed);
+        }
         toolStopwatch.Stop();
 
+        var safeErrorCode = toolResult.Success ? null : ToolFailureCodes.Sanitize(toolResult.ErrorMessage);
+
         toolCalls.Add(new AgentToolCallRecord(
-            tool.Name, toolInput, toolResult.OutputJson,
-            toolResult.Success, toolStopwatch.Elapsed, toolResult.ErrorMessage));
+            tool.Name,
+            System.Text.Json.JsonSerializer.Serialize(queryMetadata),
+            System.Text.Json.JsonSerializer.Serialize(new { outputPresent = !string.IsNullOrWhiteSpace(toolResult.OutputJson), outputLength = toolResult.OutputJson?.Length ?? 0 }),
+            toolResult.Success, toolStopwatch.Elapsed, safeErrorCode));
 
         if (!toolResult.Success)
         {
             return new AgentExecutionResult(
                 Role, false, "Failed to retrieve eligibility information.",
                 toolCalls, stopwatch.Elapsed, TerminateEarly: true,
-                ErrorMessage: toolResult.ErrorMessage);
+                ErrorMessage: safeErrorCode);
         }
 
         context.SetState("EligibilityEvaluation", toolResult.OutputJson);
@@ -71,7 +89,7 @@ public sealed class EligibilityIdentifierAgent : IAgent
         return new AgentExecutionResult(
             Role,
             Success: true,
-            Output: $"Eligibility criteria evaluated. Evidence: {toolResult.OutputJson}",
+            Output: "Eligibility criteria evaluated from retrieved evidence.",
             ToolCalls: toolCalls,
             Duration: stopwatch.Elapsed,
             TerminateEarly: false);

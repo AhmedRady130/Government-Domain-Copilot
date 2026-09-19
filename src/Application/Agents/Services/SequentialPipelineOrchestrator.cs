@@ -7,6 +7,7 @@ using GovernmentDomainCopilot.Application.Agents.Abstractions;
 using GovernmentDomainCopilot.Application.Agents.Models;
 using GovernmentDomainCopilot.Application.Answering.Abstractions;
 using GovernmentDomainCopilot.Application.Answering.Models;
+using GovernmentDomainCopilot.Application.Observability;
 using GovernmentDomainCopilot.Application.Streaming.Abstractions;
 using GovernmentDomainCopilot.Application.Streaming.Models;
 using GovernmentDomainCopilot.Application.Streaming.Services;
@@ -143,7 +144,7 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
                         agentResult.Success,
                         agentResult.ToolCalls,
                         agentResult.Output,
-                        agentResult.ErrorMessage));
+                        agentResult.Success ? null : ToolFailureCodes.Sanitize(agentResult.ErrorMessage)));
 
                     foreach (var tc in agentResult.ToolCalls)
                     {
@@ -256,7 +257,7 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
                             FallbackReason: null,
                             FinalResponse: null,
                             PendingApproval: null,
-                            FailureReason: agentResult.ErrorMessage,
+                            FailureReason: ToolFailureCodes.Sanitize(agentResult.ErrorMessage),
                             SessionId: sessionId);
                         await RecordTraceAndSessionAsync(agentFailedRecord, sessionId, userQuery);
 
@@ -264,7 +265,7 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
                             StreamEventType.RunFailed,
                             agent.Role, "Failed", totalStopwatch.ElapsedMilliseconds,
                             agentRole: agent.Role,
-                            errorMessage: TruncateErrorMessage(agentResult.ErrorMessage)));
+                            errorMessage: ToolFailureCodes.Sanitize(agentResult.ErrorMessage)));
                         return;
                     }
 
@@ -397,15 +398,15 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
                     FallbackReason: null,
                     FinalResponse: null,
                     PendingApproval: null,
-                    FailureReason: ex.Message,
+                    FailureReason: ToolFailureCodes.ExecutionFailed,
                     SessionId: sessionId);
                 await RecordTraceAndSessionAsync(failedRecord, sessionId, userQuery);
 
-                _logger.LogWarning(ex, "Streaming orchestration failed for RunId={RunId}.", runId);
+                _logger.LogSafeFailure(ex, "StreamingOrchestrationFailed", "StreamingOrchestration", resolvedCorrelationId, totalStopwatch.Elapsed);
                 sink.Emit(BuildEvent(runId, resolvedCorrelationId, tenantId,
                     StreamEventType.RunFailed,
                     "Pipeline", "Failed", totalStopwatch.ElapsedMilliseconds,
-                    errorMessage: TruncateErrorMessage(ex.Message)));
+                    errorMessage: ToolFailureCodes.ExecutionFailed));
             }
             finally
             {
@@ -506,12 +507,11 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
                     agentResult.Success,
                     agentResult.ToolCalls,
                     agentResult.Output,
-                    agentResult.ErrorMessage));
+                    agentResult.Success ? null : ToolFailureCodes.Sanitize(agentResult.ErrorMessage)));
 
                 if (!agentResult.Success)
                 {
-                    throw new InvalidOperationException(
-                        $"Agent '{agent.Role}' failed: {agentResult.ErrorMessage ?? "Unknown failure"}");
+                    throw new InvalidOperationException("Agent execution failed.");
                 }
 
                 if (agentResult.TerminateEarly)
@@ -531,10 +531,23 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
         {
             failureReason = $"Orchestration timed out after {_options.TimeoutSeconds} seconds.";
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex) when (
+            ex.Message.StartsWith("Maximum iteration limit (", StringComparison.Ordinal))
         {
-            failureReason = $"Orchestration execution failed: {ex.Message}";
-            _logger.LogWarning(ex, "Multi-agent orchestration failed for RunId={RunId}. Reason={Reason}", runId, failureReason);
+            // This is an internally generated, bounded diagnostic (the configured limit only),
+            // rather than text supplied by a provider, tool, or caller.
+            failureReason = ex.Message;
+            _logger.LogWarning(
+                "Multi-agent orchestration exceeded its configured iteration limit for RunId={RunId}.",
+                runId);
+        }
+        catch (Exception)
+        {
+            failureReason = ToolFailureCodes.ExecutionFailed;
+            _logger.LogWarning(
+                "Multi-agent orchestration failed for RunId={RunId}. ErrorCode={ErrorCode}",
+                runId,
+                failureReason);
         }
 
         totalStopwatch.Stop();
@@ -561,13 +574,16 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
                 var fallbackRequest = new GroundedAnswerRequest(userQuery, CorrelationId: resolvedCorrelationId, RunId: runId);
                 finalResponse = await _groundedAnswerUseCase.GetGroundedAnswerAsync(fallbackRequest, CancellationToken.None);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                _logger.LogError(ex, "Plain-RAG fallback also failed for RunId={RunId}.", runId);
+                _logger.LogError(
+                    "Plain-RAG fallback failed for RunId={RunId}. ErrorCode={ErrorCode}",
+                    runId,
+                    ToolFailureCodes.ExecutionFailed);
                 finalResponse = new GroundedAnswerResponse(
                     GroundedAnswerStatus.Refused,
                     null,
-                    $"Both orchestration and plain-RAG fallback failed: {ex.Message}",
+                    ToolFailureCodes.ExecutionFailed,
                     Array.Empty<CitationItem>(),
                     "OrchestratorFallback",
                     "N/A",
@@ -617,7 +633,7 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to record run trace for RunId={RunId}.", runRecord.RunId);
+                _logger.LogSafeFailure(ex, "RunTracePersistenceFailed", "RecordRunTrace", duration: runRecord.Duration);
             }
         }
 
@@ -651,7 +667,7 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to append session message for SessionId={SessionId}, RunId={RunId}.", sessionId, runRecord.RunId);
+                _logger.LogSafeFailure(ex, "SessionPersistenceFailed", "AppendSessionMessage", duration: runRecord.Duration);
             }
         }
     }
@@ -685,13 +701,13 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
             {
                 throw;
             }
-            catch (Exception ex) when (attempts < maxAttempts && !cancellationToken.IsCancellationRequested)
+            catch (Exception) when (attempts < maxAttempts && !cancellationToken.IsCancellationRequested)
             {
                 _logger.LogWarning(
-                    ex, "Agent '{Role}' thrown exception on attempt {Attempt}/{MaxAttempts}. Backing off for {Backoff}ms...",
-                    agent.Role, attempts, maxAttempts, backoffMs);
+                    "Agent {Role} failed on attempt {Attempt}/{MaxAttempts}. ErrorCode={ErrorCode}. Backing off for {Backoff}ms...",
+                    agent.Role, attempts, maxAttempts, ToolFailureCodes.ExecutionFailed, backoffMs);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 return new AgentExecutionResult(
                     agent.Role,
@@ -699,7 +715,7 @@ public sealed class SequentialPipelineOrchestrator : IMultiAgentOrchestrator
                     Output: $"Agent '{agent.Role}' failed after {attempts} attempts.",
                     ToolCalls: Array.Empty<AgentToolCallRecord>(),
                     Duration: TimeSpan.Zero,
-                    ErrorMessage: ex.Message);
+                    ErrorMessage: ToolFailureCodes.ExecutionFailed);
             }
 
             if (attempts >= maxAttempts)

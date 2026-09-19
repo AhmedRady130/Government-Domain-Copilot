@@ -335,6 +335,33 @@ public sealed class GeminiChatCompletionProviderTests
             await DrainAsync(provider.StreamCompleteAsync(request, cts.Token), cts.Token));
     }
 
+    [Fact]
+    public async Task CompleteAsync_non_success_response_does_not_echo_response_body()
+    {
+        var httpHandler = new FakeHttpMessageHandler(HttpStatusCode.Forbidden, "Invalid API key provided: FAKE-TEST-VALUE");
+        var httpClient = new HttpClient(httpHandler);
+        var provider = new GeminiChatCompletionProvider(httpClient, Options.Create(_options), NullLogger<GeminiChatCompletionProvider>.Instance);
+
+        var ex = await Assert.ThrowsAsync<LlmProviderUnavailableException>(
+            () => provider.CompleteAsync(new ChatCompletionRequest("System", "User query"), CancellationToken.None));
+
+        Assert.Contains("403", ex.Message);
+        Assert.DoesNotContain("FAKE-TEST-VALUE", ex.Message);
+    }
+
+    [Fact]
+    public async Task StreamCompleteAsync_non_success_response_does_not_echo_response_body()
+    {
+        var handler = new StreamingFakeHttpMessageHandler(HttpStatusCode.Forbidden, "Invalid API key provided: FAKE-TEST-VALUE");
+        var httpClient = new HttpClient(handler);
+        var provider = new GeminiChatCompletionProvider(httpClient, Options.Create(_options), NullLogger<GeminiChatCompletionProvider>.Instance);
+
+        var ex = await Assert.ThrowsAsync<LlmProviderUnavailableException>(async () =>
+            await DrainAsync(provider.StreamCompleteAsync(new ChatCompletionRequest("System", "User"), CancellationToken.None)));
+
+        Assert.Contains("403", ex.Message);
+        Assert.DoesNotContain("FAKE-TEST-VALUE", ex.Message);
+    }
     private sealed class StreamingFakeHttpMessageHandler : HttpMessageHandler
     {
         private readonly HttpStatusCode _statusCode;

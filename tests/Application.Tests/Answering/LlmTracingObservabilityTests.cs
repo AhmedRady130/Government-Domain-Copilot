@@ -212,7 +212,7 @@ public sealed class LlmTracingObservabilityTests
     // ─── FAILURE TRACES ──────────────────────────────────────────────────────
 
     [Fact]
-    public async Task GetGroundedAnswerAsync_ProviderThrows_RecordsFailureTraceWithRedactedError()
+    public async Task GetGroundedAnswerAsync_ProviderThrows_RecordsOnlyStableFailureCode()
     {
         // Arrange
         var traceStore = new InMemoryLlmTraceStore();
@@ -220,7 +220,8 @@ public sealed class LlmTracingObservabilityTests
 
         var sut = CreateSut(tenantId: _tenantId, traceStore: traceStore, shouldThrow: true);
 
-        var request = new GroundedAnswerRequest("government procedure", CorrelationId: corrId);
+        const string sensitiveQuery = "government procedure for SSN 123-45-6789";
+        var request = new GroundedAnswerRequest(sensitiveQuery, CorrelationId: corrId);
 
         // Act + Assert: exception re-thrown to caller
         await Assert.ThrowsAnyAsync<Exception>(() =>
@@ -231,7 +232,8 @@ public sealed class LlmTracingObservabilityTests
         Assert.Single(traces);
         Assert.False(traces[0].IsSuccess);
         Assert.NotNull(traces[0].ErrorMessage);
-        // Error message must not contain credential-like patterns
+        Assert.Equal("LlmInvocationFailed", traces[0].ErrorMessage);
+        Assert.DoesNotContain(sensitiveQuery, traces[0].ErrorMessage!);
         Assert.DoesNotContain("api-key=SHOULD_BE_REDACTED", traces[0].ErrorMessage!);
     }
 
@@ -318,7 +320,9 @@ public sealed class LlmTracingObservabilityTests
         {
             _onRequest?.Invoke(request);
             if (_shouldThrow)
-                throw new LlmProviderUnavailableException("Gemini", "Simulated failure. api-key=SHOULD_BE_REDACTED");
+                throw new LlmProviderUnavailableException(
+                    "Gemini",
+                    $"Simulated failure for {request.UserPrompt}. api-key=SHOULD_BE_REDACTED");
 
             if (_usage != null)
                 request.OnUsageResolved?.Invoke(_usage);

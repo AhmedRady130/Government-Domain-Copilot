@@ -13,6 +13,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.RateLimiting;
+using GovernmentDomainCopilot.API.Security;
 
 public static class SessionEndpoints
 {
@@ -208,6 +210,7 @@ public static class SessionEndpoints
             IMultiAgentOrchestrator orchestrator,
             ITenantContext tenantContext,
             IOptions<AppSessionOptions> sessionOptions,
+            IOptions<ApiSecurityOptions> securityOptions,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
         {
@@ -230,6 +233,10 @@ public static class SessionEndpoints
                     details = "Content is required in request body and cannot be empty."
                 });
             }
+
+            var validationFailure = QueryRequestValidator.Validate(request.Content, securityOptions.Value);
+            if (validationFailure is not null)
+                return validationFailure;
 
             var maxLen = sessionOptions.Value?.MaxMessageContentLength ?? AppSessionOptions.DefaultMaxMessageContentLength;
             if (request.Content.Length > maxLen)
@@ -343,6 +350,7 @@ public static class SessionEndpoints
         .WithSummary("Post message to session and generate assistant response")
         .WithDescription("Submits a user message to an active conversation session, invokes the grounded answer or orchestration pipeline, and returns the assistant reply.")
         .RequireAuthorization()
+        .RequireRateLimiting(ApiRateLimitPolicies.AiWorkload)
         .Produces<SessionMessageApiResponse>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
