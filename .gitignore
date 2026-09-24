@@ -484,3 +484,8 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+# Angular frontend generated files
+src/GovernmentDomainCopilot.Web/.angular/
+src/GovernmentDomainCopilot.Web/node_modules/
+src/GovernmentDomainCopilot.Web/dist/
+src/GovernmentDomainCopilot.Web/coverage/
